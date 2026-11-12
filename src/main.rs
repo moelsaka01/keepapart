@@ -494,7 +494,7 @@ fn login_label(p: &Profile) -> String {
             let s = if p.login_file_present(*t) {
                 "yes"
             } else if *t == Tool::Claude && cfg!(target_os = "macos") {
-                "keychain"
+                "?"
             } else {
                 "no"
             };
@@ -531,6 +531,10 @@ fn list(store: &Store, cwd: &std::path::Path) -> Result<i32> {
     }
     if here.is_some() {
         println!("\n* active in this folder");
+    }
+    if cfg!(target_os = "macos") && profiles.iter().any(|p| p.has(Tool::Claude)) {
+        println!("claude:? = Claude Code keeps macOS logins in the Keychain, which keepapart never reads.");
+        println!("          Check one with: keepapart run <name> -- auth status --text");
     }
     Ok(0)
 }
