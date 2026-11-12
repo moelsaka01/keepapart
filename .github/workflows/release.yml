@@ -52,12 +52,21 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
+          path: dist
           merge-multiple: true
+      - name: verify checksums
+        working-directory: dist
+        run: for f in *.sha256; do sha256sum -c "$f"; done
+      - name: render Scoop / Homebrew / winget recipes with the real checksums
+        run: python3 packaging/render.py "${GITHUB_REF_NAME}" dist dist/packaging
       - uses: softprops/action-gh-release@v2
         with:
-          files: keepapart-*
+          files: |
+            dist/keepapart-*
+            dist/packaging/*
           generate_release_notes: true
 
   crates-io:

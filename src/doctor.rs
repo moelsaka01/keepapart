@@ -1,6 +1,6 @@
 //! `keepapart doctor`: installs, PATH, isolation, links.
 
-use crate::launch::{overriding_vars, program_path};
+use crate::launch::{self, overriding_vars, Found};
 use crate::paths::same_path;
 use crate::profile::{Store, Tool};
 use crate::share::{self, is_link, ItemState, CATALOG, NEVER_SHARED};
@@ -77,8 +77,8 @@ pub fn run(store: &Store) -> Result<Doctor> {
     let profiles = store.list()?;
     for t in Tool::ALL {
         let used = profiles.iter().any(|p| p.has(t));
-        match program_path(t) {
-            Ok(path) => {
+        match launch::locate(t) {
+            Ok((path, found)) => {
                 let version = Command::new(&path)
                     .arg("--version")
                     .output()
@@ -86,12 +86,19 @@ pub fn run(store: &Store) -> Result<Doctor> {
                     .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "version unknown".into());
-                let via = if std::env::var_os(crate::launch::bin_override_var(t)).is_some_and(|v| !v.is_empty()) {
-                    format!(", from ${}", crate::launch::bin_override_var(t))
-                } else {
-                    String::new()
-                };
-                d.ok(format!("{}: {} ({version}{via})", t.program(), path.display()));
+                match found {
+                    Found::Path => d.ok(format!("{}: {} ({version})", t.program(), path.display())),
+                    Found::Override => d.ok(format!(
+                        "{}: {} ({version}, from ${})",
+                        t.program(),
+                        path.display(),
+                        launch::bin_override_var(t)
+                    )),
+                    Found::InstallerDir => {
+                        d.ok(format!("{}: {} ({version})", t.program(), path.display()));
+                        d.warn(launch::path_advice(t, &path));
+                    }
+                }
             }
             Err(e) if used => d.fail(format!("{e:#}")),
             Err(_) => d.info(format!("{} isn't on PATH (no profile uses it)", t.program())),

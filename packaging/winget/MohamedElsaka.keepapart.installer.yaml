@@ -1,13 +1,13 @@
 PackageIdentifier: MohamedElsaka.keepapart
-PackageVersion: 0.1.0
+PackageVersion: {{VERSION}}
 InstallerType: zip
 NestedInstallerType: portable
 NestedInstallerFiles:
-  - RelativeFilePath: keepapart-v0.1.0-x86_64-pc-windows-msvc\keepapart.exe
+  - RelativeFilePath: keepapart-v{{VERSION}}-x86_64-pc-windows-msvc\keepapart.exe
     PortableCommandAlias: keepapart
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/moelsaka01/keepapart/releases/download/v0.1.0/keepapart-v0.1.0-x86_64-pc-windows-msvc.zip
-    InstallerSha256: REPLACE_WITH_SHA256_FROM_RELEASE
+    InstallerUrl: https://github.com/moelsaka01/keepapart/releases/download/v{{VERSION}}/keepapart-v{{VERSION}}-x86_64-pc-windows-msvc.zip
+    InstallerSha256: {{SHA256:x86_64-pc-windows-msvc}}
 ManifestType: installer
 ManifestVersion: 1.6.0

@@ -9,6 +9,7 @@
 pub mod doctor;
 pub mod export;
 pub mod launch;
+pub mod mcp;
 pub mod paths;
 pub mod profile;
 pub mod resolve;

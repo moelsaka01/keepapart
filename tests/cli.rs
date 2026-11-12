@@ -12,6 +12,8 @@ struct Env {
     home: PathBuf,
     bin: PathBuf,
     work: PathBuf,
+    user_home: PathBuf,
+    log: PathBuf,
 }
 
 /// A fake CLI: prints the profile variables and its args, writes them to
@@ -26,6 +28,8 @@ fn write_fake(dir: &Path, name: &str, var: &str, login_file: &str) -> PathBuf {
              echo {var}=%{var}%\r\n\
              echo ACTIVE=%KEEPAPART_ACTIVE%\r\n\
              echo ARGS=%*\r\n\
+             echo APIKEY=%ANTHROPIC_API_KEY%\r\n\
+             if not \"%KP_LOG%\"==\"\" echo %KEEPAPART_ACTIVE% %*>> \"%KP_LOG%\"\r\n\
              if not \"%KP_DELAY%\"==\"\" ping -n %KP_DELAY% 127.0.0.1 >nul\r\n\
              if not \"%KP_OUT%\"==\"\" echo %{var}%> \"%KP_OUT%\"\r\n\
              echo login-for-%KEEPAPART_ACTIVE%> \"%{var}%\\{login_file}\"\r\n"
@@ -42,6 +46,8 @@ fn write_fake(dir: &Path, name: &str, var: &str, login_file: &str) -> PathBuf {
              echo \"{var}=${var}\"\n\
              echo \"ACTIVE=$KEEPAPART_ACTIVE\"\n\
              echo \"ARGS=$*\"\n\
+             echo \"APIKEY=$ANTHROPIC_API_KEY\"\n\
+             if [ -n \"$KP_LOG\" ]; then echo \"$KEEPAPART_ACTIVE $*\" >> \"$KP_LOG\"; fi\n\
              if [ -n \"$KP_DELAY\" ]; then sleep \"$KP_DELAY\"; fi\n\
              if [ -n \"$KP_OUT\" ]; then printf '%s\\n' \"${var}\" > \"$KP_OUT\"; fi\n\
              echo \"login-for-$KEEPAPART_ACTIVE\" > \"${var}/{login_file}\"\n"
@@ -58,11 +64,14 @@ fn env() -> Env {
     let home = root.join("kp home with spaces");
     let bin = root.join("bin");
     let work = root.join("work");
+    let user_home = root.join("user");
     fs::create_dir_all(&bin).unwrap();
     fs::create_dir_all(&work).unwrap();
+    fs::create_dir_all(&user_home).unwrap();
     write_fake(&bin, "claude", "CLAUDE_CONFIG_DIR", ".credentials.json");
     write_fake(&bin, "codex", "CODEX_HOME", "auth.json");
-    Env { _t: t, home, bin, work }
+    let log = root.join("calls.log");
+    Env { _t: t, home, bin, work, user_home, log }
 }
 
 impl Env {
@@ -82,12 +91,19 @@ impl Env {
             .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("CODEX_HOME")
             .env_remove("ANTHROPIC_API_KEY")
+            .env("USERPROFILE", &self.user_home)
+            .env("HOME", &self.user_home)
+            .env("KP_LOG", &self.log)
             .current_dir(&self.work);
         c
     }
 
     fn profile_dir(&self, id: &str, tool: &str) -> PathBuf {
         self.home.join("profiles").join(id).join(tool)
+    }
+
+    fn calls(&self) -> String {
+        fs::read_to_string(&self.log).unwrap_or_default()
     }
 
     fn add(&self, name: &str, tool: &str) {
@@ -355,7 +371,7 @@ fn finds_the_cli_on_path_and_doctor_is_happy() {
         .env("PATH", "")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("isn't on your PATH"));
+        .stderr(predicate::str::contains("isn't installed or isn't on your PATH"));
 }
 
 #[test]
@@ -409,4 +425,163 @@ fn without_symlink_rights_folders_still_share_live_and_removal_is_safe() {
     if cfg!(windows) {
         doc.stdout(predicate::str::contains("claude:skills shared (junction)"));
     }
+}
+
+#[test]
+fn falls_back_to_the_official_installer_folder() {
+    let e = env();
+    e.add("work", "claude");
+    let dir = e.user_home.join(".local").join("bin");
+    fs::create_dir_all(&dir).unwrap();
+    // Stand-in for the native installer's binary: on Windows a renamed copy of
+    // keepapart.exe (it prints "keepapart <version>" for --version).
+    #[cfg(windows)]
+    fs::copy(assert_cmd::cargo::cargo_bin("keepapart"), dir.join("claude.exe")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::write(dir.join("claude"), "#!/bin/sh\necho \"keepapart-fake $CLAUDE_CONFIG_DIR\"\n").unwrap();
+        fs::set_permissions(dir.join("claude"), fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    e.cmd()
+        .args(["run", "work", "--", "--version"])
+        .env("PATH", "")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("keepapart"))
+        .stderr(predicate::str::contains("keepapart uses").and(predicate::str::contains(".local")));
+    e.cmd()
+        .arg("doctor")
+        .env("PATH", "")
+        .assert()
+        .stdout(predicate::str::contains("warn").and(predicate::str::contains("to your PATH")));
+}
+
+#[test]
+fn clean_env_hides_api_keys_from_one_launch() {
+    let e = env();
+    e.add("work", "claude");
+    let line = |args: &[&str]| {
+        let out = e.cmd().args(args).env("ANTHROPIC_API_KEY", "sk-test").output().unwrap();
+        let so = String::from_utf8_lossy(&out.stdout).to_string();
+        let se = String::from_utf8_lossy(&out.stderr).to_string();
+        (so.lines().find(|l| l.starts_with("APIKEY=")).unwrap_or("").trim().to_string(), se)
+    };
+    let (k, warn) = line(&["run", "work"]);
+    assert_eq!(k, "APIKEY=sk-test");
+    assert!(warn.contains("--clean-env"), "{warn}");
+    let (k, warn) = line(&["run", "work", "--clean-env"]);
+    assert_eq!(k, "APIKEY=");
+    assert!(!warn.contains("ANTHROPIC_API_KEY"), "{warn}");
+}
+
+#[test]
+fn remove_signs_out_through_the_official_cli_first() {
+    let e = env();
+    e.add("work", "both");
+    e.add("personal", "claude");
+    e.cmd().args(["login", "work"]).assert().success();
+    e.cmd().args(["login", "personal"]).assert().success();
+    fs::write(&e.log, "").unwrap();
+    e.cmd().args(["remove", "work", "--yes"]).assert().success().stdout(predicate::str::contains("Signed out"));
+    let calls = e.calls();
+    assert!(calls.contains("work auth logout"), "{calls}");
+    assert!(calls.contains("work logout"), "{calls}");
+    assert!(!calls.contains("personal"), "{calls}");
+
+    fs::write(&e.log, "").unwrap();
+    e.cmd().args(["remove", "personal", "--yes", "--keep-login"]).assert().success();
+    assert_eq!(e.calls().trim(), "");
+}
+
+#[test]
+fn mcp_servers_are_shared_through_the_official_cli() {
+    let e = env();
+    e.add("work", "claude");
+    e.add("personal", "both");
+    e.add("codexonly", "codex");
+    e.cmd()
+        .args(["mcp", "add", "gh", r#"{"command":"npx","args":["-y","@modelcontextprotocol/server-github"]}"#])
+        .assert()
+        .success();
+    let calls = e.calls();
+    for p in ["work", "personal"] {
+        assert!(calls.contains(&format!("{p} mcp add-json --scope user gh")), "{calls}");
+    }
+    assert!(!calls.contains("codexonly"), "{calls}");
+    let toml = fs::read_to_string(e.home.join("profiles").join("work").join("profile.toml")).unwrap();
+    assert!(toml.contains("mcp_synced = [\"gh\"]"), "{toml}");
+    e.cmd()
+        .args(["mcp", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("gh").and(predicate::str::contains("npx")));
+
+    // a new profile picks the shared servers up
+    fs::write(&e.log, "").unwrap();
+    e.add("client", "claude");
+    assert!(e.calls().contains("client mcp add-json --scope user gh"), "{}", e.calls());
+
+    fs::write(&e.log, "").unwrap();
+    e.cmd().args(["mcp", "remove", "gh"]).assert().success();
+    let calls = e.calls();
+    assert!(calls.contains("work mcp remove --scope user gh"), "{calls}");
+    assert!(!calls.contains("add-json"), "{calls}");
+    e.cmd().args(["mcp", "add", "bad", "not json"]).assert().failure();
+}
+
+#[test]
+fn copied_shared_files_stay_in_sync() {
+    let e = env();
+    for n in ["a", "b"] {
+        e.cmd()
+            .env("KEEPAPART_LINK_MODE", "copy")
+            .args(["add", n, "--tool", "claude", "--no-login"])
+            .assert()
+            .success();
+    }
+    let a_md = e.profile_dir("a", "claude").join("CLAUDE.md");
+    let b_md = e.profile_dir("b", "claude").join("CLAUDE.md");
+    let later = |p: &Path, secs: u64| {
+        let f = fs::OpenOptions::new().write(true).open(p).unwrap();
+        f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(secs)).unwrap();
+    };
+    fs::write(&a_md, "edited in a").unwrap();
+    later(&a_md, 5);
+    e.cmd().arg("sync").assert().success().stdout(predicate::str::contains("refreshed"));
+    assert_eq!(fs::read_to_string(&b_md).unwrap(), "edited in a");
+
+    // launching a profile carries its newer edit back to the shared copy
+    fs::write(&b_md, "edited in b").unwrap();
+    later(&b_md, 60);
+    e.cmd().args(["run", "b"]).assert().success().stderr(predicate::str::contains("refreshed shared copies"));
+    assert_eq!(fs::read_to_string(e.home.join("shared").join("claude").join("CLAUDE.md")).unwrap(), "edited in b");
+    e.cmd().arg("sync").assert().success();
+    assert_eq!(fs::read_to_string(&a_md).unwrap(), "edited in b");
+    e.cmd().arg("sync").assert().success().stdout(predicate::str::contains("up to date"));
+}
+
+#[test]
+fn closed_stdout_is_not_a_crash() {
+    let e = env();
+    e.add("work", "claude");
+    let mut c = std::process::Command::new(assert_cmd::cargo::cargo_bin("keepapart"));
+    for (k, v) in e.cmd().get_envs() {
+        match v {
+            Some(v) => c.env(k, v),
+            None => c.env_remove(k),
+        };
+    }
+    let mut child = c
+        .args(["shared"])
+        .current_dir(&e.work)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    let out = child.wait_with_output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("panicked"), "{err}");
+    assert!(out.status.success(), "{err}");
 }

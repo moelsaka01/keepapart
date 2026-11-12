@@ -33,6 +33,7 @@ junction = "1"
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
+which = "6"
 
 [profile.release]
 lto = true

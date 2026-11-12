@@ -1,7 +1,12 @@
 //! Optional shell hooks: plain `claude` / `codex` pick up the profile for the
 //! folder you're in. The hook runs `keepapart env --shell <sh>` before each
-//! prompt and evaluates its output, which only ever sets or unsets
+//! prompt and applies its output, which only ever sets or unsets
 //! CLAUDE_CONFIG_DIR, CODEX_HOME and KEEPAPART_ACTIVE.
+//!
+//! The PowerShell hook never uses Invoke-Expression: it's saved as a file that
+//! your profile dot-sources, and it reads plain `set`/`unset` data lines
+//! (`--shell ps-data`) instead of running generated code. Windows Defender
+//! blocks some Invoke-Expression patterns, and a hook shouldn't look like one.
 
 use crate::profile::Tool;
 use clap::ValueEnum;
@@ -13,6 +18,9 @@ pub enum Shell {
     Fish,
     #[value(alias = "pwsh")]
     Powershell,
+    /// Tab-separated `set NAME VALUE` / `unset NAME` lines, read by the PowerShell hook.
+    #[value(name = "ps-data", hide = true)]
+    PsData,
 }
 
 pub const ACTIVE_VAR: &str = "KEEPAPART_ACTIVE";
@@ -23,6 +31,7 @@ pub fn quote(shell: Shell, s: &str) -> String {
         Shell::Bash | Shell::Zsh => format!("'{}'", s.replace('\'', r"'\''")),
         Shell::Fish => format!("'{}'", s.replace('\\', r"\\").replace('\'', r"\'")),
         Shell::Powershell => format!("'{}'", s.replace('\'', "''")),
+        Shell::PsData => s.to_string(),
     }
 }
 
@@ -31,6 +40,7 @@ fn set(shell: Shell, k: &str, v: &str) -> String {
         Shell::Bash | Shell::Zsh => format!("export {k}={}", quote(shell, v)),
         Shell::Fish => format!("set -gx {k} {}", quote(shell, v)),
         Shell::Powershell => format!("$env:{k} = {}", quote(shell, v)),
+        Shell::PsData => format!("set\t{k}\t{v}"),
     }
 }
 
@@ -39,6 +49,7 @@ fn unset(shell: Shell, k: &str) -> String {
         Shell::Bash | Shell::Zsh => format!("unset {k}"),
         Shell::Fish => format!("set -e {k}"),
         Shell::Powershell => format!("Remove-Item Env:{k} -ErrorAction SilentlyContinue"),
+        Shell::PsData => format!("unset\t{k}"),
     }
 }
 
@@ -119,14 +130,21 @@ function __keepapart_hook --on-event fish_prompt
 end
 "#
         }
-        Shell::Powershell => {
-            r#"# keepapart: apply the folder's profile before each prompt
+        Shell::Powershell | Shell::PsData => {
+            r#"# keepapart: apply the folder's profile before each prompt.
+# Dot-source this file from your PowerShell profile. It runs no generated code:
+# keepapart prints "set<TAB>NAME<TAB>VALUE" / "unset<TAB>NAME" lines and this
+# hook applies them to CLAUDE_CONFIG_DIR, CODEX_HOME and KEEPAPART_ACTIVE only.
 if (-not $global:__keepapartHooked) {
     $global:__keepapartHooked = $true
     $global:__keepapartPrompt = $function:prompt
     function global:prompt {
-        $kp = (& keepapart env --shell powershell 2>$null) -join "`n"
-        if ($kp) { Invoke-Expression $kp }
+        foreach ($kpLine in @(& keepapart env --shell ps-data 2>$null)) {
+            $kpPart = $kpLine -split "`t", 3
+            if ($kpPart[1] -notin @('CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'KEEPAPART_ACTIVE')) { continue }
+            if ($kpPart[0] -eq 'set') { Set-Item -LiteralPath "Env:$($kpPart[1])" -Value $kpPart[2] }
+            elseif ($kpPart[0] -eq 'unset') { Remove-Item -LiteralPath "Env:$($kpPart[1])" -ErrorAction SilentlyContinue }
+        }
         & $global:__keepapartPrompt
     }
 }
@@ -135,13 +153,23 @@ if (-not $global:__keepapartHooked) {
     }
 }
 
+/// File name used by `keepapart hook <shell> --write`.
+pub fn hook_file_name(shell: Shell) -> &'static str {
+    match shell {
+        Shell::Bash => "hook.bash",
+        Shell::Zsh => "hook.zsh",
+        Shell::Fish => "hook.fish",
+        Shell::Powershell | Shell::PsData => "hook.ps1",
+    }
+}
+
 pub fn install_hint(shell: Shell) -> &'static str {
     match shell {
         Shell::Bash => r#"Add to ~/.bashrc:   eval "$(keepapart hook bash)""#,
         Shell::Zsh => r#"Add to ~/.zshrc:    eval "$(keepapart hook zsh)""#,
         Shell::Fish => "Add to ~/.config/fish/config.fish:   keepapart hook fish | source",
-        Shell::Powershell => {
-            r#"Add to your PowerShell profile (notepad $PROFILE):   Invoke-Expression ((& keepapart hook powershell) -join "`n")"#
+        Shell::Powershell | Shell::PsData => {
+            r#"Run `keepapart hook powershell --write`, then add the line it prints to your PowerShell profile (notepad $PROFILE)"#
         }
     }
 }
@@ -207,9 +235,22 @@ mod tests {
 
     #[test]
     fn hooks_call_env_for_their_own_shell() {
-        for sh in [Shell::Bash, Shell::Zsh, Shell::Fish, Shell::Powershell] {
+        for sh in [Shell::Bash, Shell::Zsh, Shell::Fish] {
             let name = sh.to_possible_value().unwrap().get_name().to_string();
             assert!(hook(sh).contains(&format!("env --shell {name}")), "{name}");
         }
+        let ps = hook(Shell::Powershell);
+        assert!(ps.contains("env --shell ps-data"));
+        assert!(!ps.contains("Invoke-Expression") && !ps.to_lowercase().contains("iex"));
+    }
+
+    #[test]
+    fn ps_data_lines() {
+        let d = Desired { profile: "w".into(), dirs: vec![(Tool::Claude, r"C:\k\w's\claude".into())] };
+        let cur = env(&[("CODEX_HOME", "x"), ("KEEPAPART_ACTIVE", "old")]);
+        let s = env_script(Shell::PsData, Some(&d), &cur);
+        assert!(s.contains("set\tCLAUDE_CONFIG_DIR\tC:\\k\\w's\\claude\n"), "{s}");
+        assert!(s.contains("unset\tCODEX_HOME\n"), "{s}");
+        assert!(s.contains("set\tKEEPAPART_ACTIVE\tw\n"), "{s}");
     }
 }

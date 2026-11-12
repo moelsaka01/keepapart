@@ -11,8 +11,10 @@ A single-binary CLI that gives each account its own Claude Code / Codex profile.
 ![No telemetry](https://img.shields.io/badge/telemetry-none-brightgreen)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-<!-- TODO: replace with assets/demo.gif: keepapart add work, then keepapart run work and keepapart run personal in two terminals, /status in each -->
-![keepapart demo: two accounts running side by side](assets/demo-placeholder.svg)
+<!-- Rendered by assets/make_demo.py from the commands and outputs in docs/windows-test.md -->
+![keepapart demo: two profiles answering side by side, then one is logged out while the other stays signed in](assets/demo.gif)
+
+<sub>Commands and outputs from the <a href="docs/windows-test.md">live Windows 11 test</a>, drawn as an animation by <a href="assets/make_demo.py">assets/make_demo.py</a> (not a screen recording).</sub>
 
 </div>
 
@@ -38,7 +40,8 @@ Claude Code and Codex keep **one login per machine**. Supporting several account
 | 🖥️ **Side by side** | `keepapart run work` in one terminal, `keepapart run personal` in another. Each is its own process with its own environment |
 | 📁 **Per-folder profiles** | `keepapart use client-acme` writes a `.keepapart` file, so that repo always uses the client account. You can commit it |
 | 🔗 **Shared or per-profile config** | Skills, agents, commands and global instructions are shared by default; settings, plugins and Codex `config.toml` are your choice. Logins and history are never shared |
-| 🐚 **Optional shell hook** | bash, zsh, fish and PowerShell: plain `claude` follows the folder you're in |
+| 🔌 **Shared MCP servers** | `keepapart mcp add` installs a server in every Claude profile through the official `claude mcp add-json` |
+| 🐚 **Optional shell hook** | bash, zsh, fish and PowerShell: plain `claude` follows the folder you're in. The PowerShell hook runs no `Invoke-Expression` |
 | 🩺 **`doctor`** | Checks installs, PATH, isolation, broken links and Windows symlink rights |
 | 📦 **Settings export** | `export-config` writes settings only, with secret-looking values redacted |
 | 🚫 **No network, no telemetry** | keepapart makes no network calls of its own. Not even an update check |
@@ -50,9 +53,9 @@ Claude Code and Codex keep **one login per machine**. Supporting several account
 | Any (Rust) | `cargo install keepapart` |
 | Windows | download `keepapart-*-x86_64-pc-windows-msvc.zip` from [Releases](https://github.com/moelsaka01/keepapart/releases), put `keepapart.exe` on your PATH |
 | macOS / Linux | download the `.tar.gz` for your platform from [Releases](https://github.com/moelsaka01/keepapart/releases), put `keepapart` on your PATH |
-| Scoop · Homebrew · winget | recipes are in [`packaging/`](packaging/); they go live with the first tagged release |
+| Scoop · Homebrew · winget | every release attaches ready-to-publish recipes with real checksums ([`packaging/`](packaging/)); the bucket, tap and winget entry go live after the first release |
 
-You also need the official CLIs you plan to use: [Claude Code](https://code.claude.com/docs/en/setup) and/or [Codex](https://developers.openai.com/codex/cli).
+You also need the official CLIs you plan to use: [Claude Code](https://code.claude.com/docs/en/setup) and/or [Codex](https://developers.openai.com/codex/cli). If the Claude Code installer left `claude` in `~/.local/bin` without adding it to PATH, keepapart still finds it there and tells you how to fix PATH.
 
 ## Try it in 30 seconds
 
@@ -77,15 +80,17 @@ Pass arguments to the CLI after `--`: `keepapart run work -- --resume`, `keepapa
 | `keepapart` | Pick a profile from a list and launch it |
 | `add <name> [--tool claude\|codex\|both] [--isolated] [--no-login]` | Create a profile (or add a tool to one) and log in with the official CLI |
 | `login <name> [--tool]` | Log in again, through the official CLI |
-| `run [name] [--tool] [-- args]` | Launch `claude` / `codex` as that profile. With no name, uses the folder's profile |
+| `run [name] [--tool] [--clean-env] [-- args]` | Launch `claude` / `codex` as that profile. With no name, uses the folder's profile. `--clean-env` hides `ANTHROPIC_API_KEY` and friends from that launch |
 | `use <name> [--global] [--clear]` | Pin a profile to this folder (`.keepapart`), or set the global default |
 | `list` / `status` | Profiles, tools, login file present, last used; which profile applies here and why |
 | `share <name> <item>…` / `unshare` / `shared` | Share items such as `claude:skills` between profiles, or keep them per profile |
+| `sync` | Refresh shared items that are copies (Windows without symlink rights); also happens at every `run` |
+| `mcp add <name> '<json>'` / `remove` / `list` / `sync` | Share a Claude Code MCP server with every profile, via `claude mcp add-json --scope user` |
 | `rename <old> <new>` | Rename a profile. Its folders don't move, so its logins keep working |
-| `remove <name>` | Delete a profile and its login files. Shared items are untouched |
+| `remove <name> [--keep-login]` | Sign the profile out through the official CLIs, then delete it. Shared items are untouched |
 | `export-config <name> [--out dir]` | Settings only, never logins, with secrets redacted |
 | `doctor` | Check everything |
-| `hook <bash\|zsh\|fish\|powershell>` | Print the shell hook |
+| `hook <bash\|zsh\|fish\|powershell> [--write]` | Print the shell hook, or save it to a file and print the line for your shell profile |
 
 Which profile applies, first match wins: the name you pass → `$KEEPAPART_PROFILE` → the nearest `.keepapart` file in this folder or a parent → the global default.
 
@@ -134,12 +139,16 @@ Where each official CLI stores the login it creates, and why a separate folder k
 
 Codex's keyring entry is named after a SHA-256 of the `CODEX_HOME` path ([`codex-rs/login/src/auth/storage.rs`](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/storage.rs)), so separate folders get separate entries even in keyring mode.
 
-**Known limits, stated plainly:**
+**Edge cases, and how keepapart handles them:**
 
-- A **Claude Console sign-in without an API key** is stored outside the config folder, per Anthropic's docs, so separate folders don't keep two of those apart. Subscription (claude.ai) logins and API keys are kept apart.
-- `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` in your environment **override every profile**. `keepapart run` and `doctor` warn when one is set.
-- Claude Code keeps **user-level MCP servers** in `.claude.json`, next to account data, so those stay per profile. To share an MCP server, use a plugin (`claude:plugins`) or a project `.mcp.json`. Codex MCP servers live in `config.toml`, which you can share (`codex:config.toml`).
-- On macOS, `remove` deletes the profile folder but **leaves Claude Code's Keychain entry for it**, because keepapart never touches the Keychain. Delete it in Keychain Access if you want.
+| Situation | What happens |
+|---|---|
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `CLAUDE_CODE_OAUTH_TOKEN` set in your shell | They override every profile's login. `run` and `doctor` warn, and `keepapart run <name> --clean-env` hides them from that launch |
+| Claude Code's user-level MCP servers live in `.claude.json`, next to account data | keepapart never links or edits that file. `keepapart mcp add` installs shared servers in each profile with the official `claude mcp add-json --scope user`. Codex MCP servers are in `config.toml`, which you can share directly |
+| macOS Keychain entries | `remove` first runs the official `claude auth logout` / `codex logout`, which clear their own keychain entries. keepapart never touches the keychain itself |
+| Windows without symlink rights | Shared folders use junctions (live). Shared files are copies, synced newest-wins at every `run` and by `keepapart sync` |
+| `claude` installed but not on PATH | keepapart uses the official installer's folder (`~/.local/bin`) and tells you which folder to add to PATH |
+| **Claude Console sign-in without an API key** | **Not separable.** Per Anthropic's docs that sign-in is stored outside the config folder, so two of them can't be kept apart by any folder-based tool. Subscription (claude.ai) logins and API keys are kept apart |
 
 ## Shared vs per-profile
 
@@ -159,22 +168,36 @@ keepapart unshare work claude:skills          # work gets its own copy of the sk
 
 The first profile to share an item seeds the shared copy. If two profiles both already have one, `share` refuses until you pass `--force`, and even then the old copy is kept as a backup, never deleted.
 
-**On Windows**, a shared item is a symlink when Windows allows it (Developer Mode or admin). Otherwise shared folders use **junctions**, which need no special rights and stay live, and shared files are **copies** that `keepapart share` refreshes. `keepapart doctor` tells you which you have.
+**On Windows**, a shared item is a symlink when Windows allows it (Developer Mode or admin). Otherwise shared folders use **junctions**, which need no special rights and stay live, and shared files are **copies**, synced newest-wins every time you `keepapart run` a profile and whenever you run `keepapart sync`. `keepapart doctor` tells you which you have.
+
+**MCP servers** for Claude Code are shared separately, through the official CLI:
+
+```bash
+keepapart mcp add github '{"command":"npx","args":["-y","@modelcontextprotocol/server-github"]}'
+keepapart mcp list
+keepapart mcp remove github     # removed from every profile keepapart added it to
+```
+
+New profiles get the shared servers automatically. Servers you added to a profile yourself under other names are left alone.
 
 ## Shell hook (optional)
 
 Without the hook, use `keepapart run`. With it, plain `claude` and `codex` follow the folder's profile:
 
 ```bash
-eval "$(keepapart hook bash)"                                  # ~/.bashrc
-eval "$(keepapart hook zsh)"                                   # ~/.zshrc
-keepapart hook fish | source                                   # ~/.config/fish/config.fish
-```
-```powershell
-Invoke-Expression ((& keepapart hook powershell) -join "`n")   # notepad $PROFILE
+eval "$(keepapart hook bash)"          # ~/.bashrc
+eval "$(keepapart hook zsh)"           # ~/.zshrc
+keepapart hook fish | source           # ~/.config/fish/config.fish
 ```
 
-The hook only sets or unsets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `KEEPAPART_ACTIVE`, and only unsets variables it set itself. cmd.exe has no prompt hook, so use `keepapart run` there.
+PowerShell (Windows PowerShell 5.1 and PowerShell 7):
+
+```powershell
+keepapart hook powershell --write      # saves ~/.keepapart/hook.ps1 and prints the line below
+. "$HOME\.keepapart\hook.ps1"          # add this line to your profile: notepad $PROFILE
+```
+
+The hook only sets or unsets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `KEEPAPART_ACTIVE`, and only unsets variables it set itself. The PowerShell hook uses no `Invoke-Expression`: it reads plain `set`/`unset` lines and applies only those three variables. (Windows Defender blocks some `Invoke-Expression` patterns; this showed up in testing, and the hook was designed around it.) cmd.exe has no prompt hook, so use `keepapart run` there. The hooks are tested in real bash, zsh, fish and PowerShell in CI.
 
 ## Security
 
@@ -183,7 +206,8 @@ The hook only sets or unsets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `KEEPAPART_AC
 - The only thing it checks about a login is **whether the login file exists** (for `list` / `doctor`). It never opens it.
 - **No network calls, no telemetry, no update checks.** It doesn't show usage or limits, because that would mean using your token or calling unofficial endpoints. Run `/usage` in Claude Code or `/status` in Codex instead.
 - **`export-config`** copies settings items only, drops any file named like a login, and replaces secret-looking values (`*KEY*`, `*TOKEN*`, `sk-…`, `ghp_…`, `Bearer …`) with `<redacted>`. A file it can't parse is skipped, not exported unchecked.
-- **`remove`** refuses to delete anything outside `~/.keepapart/profiles/`, removes links before deleting, and asks first.
+- **`remove`** signs out through the official CLI first (`--keep-login` to skip), refuses to delete anything outside `~/.keepapart/profiles/`, removes links before deleting, and asks first.
+- **`keepapart mcp`** only ever calls the official `claude mcp add-json` / `claude mcp remove`. Shared server definitions live in `~/.keepapart/shared/claude/mcp-servers.json`; any secrets you put in a server's `env` sit there in plain text, just as they would in `.claude.json`.
 
 ## Comparison
 
@@ -212,7 +236,7 @@ Having separate accounts for separate purposes (an employer's seat and a persona
 Ask the official CLI: `keepapart run work -- auth status --text` (Claude) or `keepapart run work --tool codex -- login status` (Codex).
 
 **`claude` isn't found on Windows, but I just installed it.**
-The native installer puts it in `%USERPROFILE%\.local\bin` and doesn't add that folder to PATH. `keepapart doctor` spots this and tells you which folder to add.
+The native installer puts it in `%USERPROFILE%\.local\bin` and doesn't add that folder to PATH. keepapart still finds it there, and `keepapart doctor` tells you which folder to add so plain `claude` works too.
 
 **Will this log me out of my normal `~/.claude`?**
 No. keepapart never touches `~/.claude` or `~/.codex`. Plain `claude` keeps working as before unless you install the shell hook.
@@ -230,7 +254,7 @@ keepapart launches CLIs. An editor started from a terminal where the hook has se
 A single static binary with no runtime to install, which matters on Windows. It also starts in milliseconds, which matters for a shell hook that runs before every prompt.
 
 **How do I uninstall?**
-Delete the binary and `~/.keepapart`. Each profile's logins are inside its folder, except the macOS Keychain entries noted above.
+Run `keepapart remove <name>` for each profile (it signs each one out through the official CLI), then delete the binary and `~/.keepapart`.
 
 ## Development
 
@@ -239,7 +263,15 @@ cargo test                       # unit + end-to-end tests; uses stand-in claude
 cargo clippy --all-targets -- -D warnings
 ```
 
-The end-to-end tests run the real binary against fake `claude` / `codex` executables found through PATH (`.cmd` on Windows). They check that each profile gets its own folder, that two profiles run at the same time without crossing, that logins can't be shared, that a removed profile never deletes shared content, and that the junction/copy fallback works. CI runs them on Windows, macOS and Ubuntu.
+The end-to-end tests run the real binary against fake `claude` / `codex` executables found through PATH (`.cmd` on Windows), with a throwaway home folder so they can never reach a real CLI or login. They check that:
+
+- each profile gets its own folder, and two profiles run at the same time without crossing
+- logins can't be shared, and `remove` signs out through the official CLI and never deletes shared content
+- the junction/copy fallback and copy syncing work
+- MCP servers are shared through `claude mcp add-json`
+- `--clean-env` hides API keys from a launch
+
+`tests/hooks.rs` runs the shell hooks in real bash, zsh, fish and PowerShell. CI runs everything on Windows, macOS and Ubuntu. The live run on a real machine with real logins is in [docs/windows-test.md](docs/windows-test.md).
 
 ## License
 

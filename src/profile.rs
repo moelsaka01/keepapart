@@ -133,6 +133,9 @@ pub struct ProfileFile {
     pub created: u64,
     #[serde(default)]
     pub shared: Vec<SharedEntry>,
+    /// MCP servers keepapart added to this profile with `claude mcp add-json`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_synced: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -294,7 +297,13 @@ impl Store {
         let p = Profile {
             id,
             dir,
-            file: ProfileFile { name: name.to_string(), tools, created: paths::now_secs(), shared: vec![] },
+            file: ProfileFile {
+                name: name.to_string(),
+                tools,
+                created: paths::now_secs(),
+                shared: vec![],
+                mcp_synced: vec![],
+            },
         };
         for t in &p.file.tools {
             // CODEX_HOME must exist before codex runs; create both up front.

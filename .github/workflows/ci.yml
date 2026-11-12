@@ -28,6 +28,12 @@ jobs:
       - name: fmt
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --check
+      - name: shells for the hook tests
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y zsh fish
+      - name: shells for the hook tests
+        if: matrix.os == 'macos-latest'
+        run: brew install fish
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: test
@@ -40,6 +46,23 @@ jobs:
           cargo run -q -- list
           cargo run -q -- shared
           cargo run -q -- doctor || true
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: render recipes from fake archives (catches template mistakes before a release)
+        run: |
+          mkdir dist
+          for t in x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
+            echo x > dist/keepapart-v0.0.0-$t.zip; (cd dist && sha256sum keepapart-v0.0.0-$t.zip > keepapart-v0.0.0-$t.zip.sha256)
+          done
+          for t in x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            echo x > dist/keepapart-v0.0.0-$t.tar.gz; (cd dist && sha256sum keepapart-v0.0.0-$t.tar.gz > keepapart-v0.0.0-$t.tar.gz.sha256)
+          done
+          python3 packaging/render.py 0.0.0 dist out
+          python3 -c "import json; json.load(open('out/keepapart.json'))"
+          ruby -c out/keepapart.rb
 
   msrv:
     runs-on: ubuntu-latest

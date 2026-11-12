@@ -5,7 +5,7 @@ use keepapart::profile::{Profile, Store, Tool, ToolChoice};
 use keepapart::resolve::{self, Resolved, Source};
 use keepapart::share::{self, ItemState, ShareOutcome, CATALOG};
 use keepapart::shell::{self, Desired, Shell};
-use keepapart::{doctor, export, launch};
+use keepapart::{doctor, export, launch, mcp};
 use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -58,6 +58,10 @@ enum Cmd {
         /// Which CLI, for profiles that have both (default: claude)
         #[arg(long, short, value_enum)]
         tool: Option<Tool>,
+        /// Hide ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / CLAUDE_CODE_OAUTH_TOKEN from this launch,
+        /// so the profile's own login is used
+        #[arg(long)]
+        clean_env: bool,
         /// Arguments passed to claude/codex, after --
         #[arg(last = true)]
         args: Vec<OsString>,
@@ -104,6 +108,9 @@ enum Cmd {
         name: String,
         #[arg(long, short)]
         yes: bool,
+        /// Don't sign out through the official CLI before deleting
+        #[arg(long)]
+        keep_login: bool,
     },
     /// Rename a profile (its folders stay put, so the login survives)
     #[command(alias = "mv")]
@@ -114,12 +121,22 @@ enum Cmd {
         #[arg(long, short)]
         out: Option<PathBuf>,
     },
+    /// Refresh shared items that are copies (Windows without symlink rights): newest wins
+    Sync,
+    /// Share Claude Code MCP servers across profiles (installed with `claude mcp add-json`)
+    Mcp {
+        #[command(subcommand)]
+        cmd: McpCmd,
+    },
     /// Check installs, PATH, isolation and link permissions
     Doctor,
     /// Print a shell hook that applies the folder's profile to plain claude/codex
     Hook {
         #[arg(value_enum)]
         shell: Shell,
+        /// Save the hook to a file in keepapart's folder and print the line to add to your shell profile
+        #[arg(long)]
+        write: bool,
     },
     /// Print env commands for the current folder's profile (used by the hook)
     Env {
@@ -128,7 +145,33 @@ enum Cmd {
     },
 }
 
+#[derive(Subcommand)]
+enum McpCmd {
+    /// Share a server: keepapart mcp add github '{"command":"npx","args":["-y","@modelcontextprotocol/server-github"]}'
+    Add { name: String, json: String },
+    /// Stop sharing a server (removed from every profile keepapart added it to)
+    Remove { name: String },
+    /// List shared servers
+    List,
+    /// Install the shared servers into every Claude profile (or one)
+    Sync { profile: Option<String> },
+}
+
 fn main() {
+    // `keepapart list | head` closes the pipe early; exit quietly instead of panicking.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = info
+            .payload()
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| info.payload().downcast_ref::<&str>().copied())
+            .unwrap_or("");
+        if msg.contains("failed printing to std") {
+            std::process::exit(0);
+        }
+        default_hook(info);
+    }));
     let code = match real_main() {
         Ok(c) => c,
         Err(e) => {
@@ -164,14 +207,14 @@ fn real_main() -> Result<i32> {
             }
             Ok(0)
         }
-        Some(Cmd::Run { name, tool, args }) => {
+        Some(Cmd::Run { name, tool, clean_env, args }) => {
             let r = need_profile(&store, name.as_deref(), &cwd)?;
             let p = store.find(&r.name).with_context(|| format!("profile {}", r.source.describe()))?;
             let t = pick_tool(&p, tool)?;
             if r.source != Source::Explicit {
                 eprintln!("keepapart: {} as {:?} ({})", t.as_str(), p.name(), r.source.describe());
             }
-            launch::run(&p, t, &args)
+            launch_profile(&store, &p, t, &args, clean_env)
         }
         Some(Cmd::Use { name, global, dir, clear }) => use_cmd(&store, name, global, dir, clear, &cwd),
         Some(Cmd::List) => list(&store, &cwd),
@@ -203,7 +246,7 @@ fn real_main() -> Result<i32> {
             Ok(0)
         }
         Some(Cmd::Shared { profile }) => shared(&store, profile.as_deref()),
-        Some(Cmd::Remove { name, yes }) => remove(&store, &name, yes),
+        Some(Cmd::Remove { name, yes, keep_login }) => remove(&store, &name, yes, keep_login),
         Some(Cmd::Rename { old, new }) => {
             store.rename(&old, &new)?;
             println!("Renamed {old} -> {new}. Its folders didn't move, so its logins still work.");
@@ -227,11 +270,40 @@ fn real_main() -> Result<i32> {
             println!("No logins, tokens or session history are included.");
             Ok(0)
         }
+        Some(Cmd::Sync) => {
+            let report = share::sync_all(&store)?;
+            if report.is_empty() {
+                println!("All shared copies are up to date.");
+            }
+            for (p, items) in report {
+                println!("{p}: refreshed {}", items.join(", "));
+            }
+            Ok(0)
+        }
+        Some(Cmd::Mcp { cmd }) => mcp_cmd(&store, cmd),
         Some(Cmd::Doctor) => {
             let d = doctor::run(&store)?;
             Ok(if d.errors > 0 { 1 } else { 0 })
         }
-        Some(Cmd::Hook { shell }) => {
+        Some(Cmd::Hook { shell, write: true }) => {
+            let path = store.home.join(shell::hook_file_name(shell));
+            keepapart::paths::write_atomic(&path, shell::hook(shell).as_bytes())?;
+            println!("Wrote {}", path.display());
+            let line = match shell {
+                Shell::Powershell | Shell::PsData => format!(". '{}'", path.display().to_string().replace('\'', "''")),
+                Shell::Fish => format!("source {}", shell::quote(Shell::Fish, &path.display().to_string())),
+                _ => format!(". {}", shell::quote(Shell::Bash, &path.display().to_string())),
+            };
+            let profile = match shell {
+                Shell::Bash => "~/.bashrc",
+                Shell::Zsh => "~/.zshrc",
+                Shell::Fish => "~/.config/fish/config.fish",
+                Shell::Powershell | Shell::PsData => "your PowerShell profile (notepad $PROFILE)",
+            };
+            println!("Add this line to {profile}:\n\n    {line}\n");
+            Ok(0)
+        }
+        Some(Cmd::Hook { shell, write: false }) => {
             print!("{}", shell::hook(shell));
             if std::io::stdout().is_terminal() {
                 eprintln!("\n# {}", shell::install_hint(shell));
@@ -340,6 +412,16 @@ fn add(store: &Store, name: &str, choice: ToolChoice, isolated: bool, no_login: 
             if let Err(e) = r {
                 eprintln!("keepapart: couldn't share {id}: {e:#}");
             }
+        }
+    }
+    if !isolated && p.has(Tool::Claude) && !mcp::load(store)?.is_empty() {
+        if launch::program_path(Tool::Claude).is_ok() {
+            match mcp::sync_profile(store, &mut p) {
+                Ok(log) => println!("Shared MCP servers: {}", log.join(", ")),
+                Err(e) => eprintln!("keepapart: couldn't install shared MCP servers: {e:#}"),
+            }
+        } else {
+            println!("Shared MCP servers will be installed by `keepapart mcp sync` once claude is installed.");
         }
     }
     println!("Kept per profile, always: login, session history, projects.");
@@ -521,25 +603,18 @@ fn shared(store: &Store, profile: Option<&str>) -> Result<i32> {
     Ok(0)
 }
 
-fn remove(store: &Store, name: &str, yes: bool) -> Result<i32> {
+fn remove(store: &Store, name: &str, yes: bool, keep_login: bool) -> Result<i32> {
     let p = store.find(name)?;
     println!("This deletes {}", p.dir.display());
     println!("including profile {name:?}'s login files and session history. Shared items are untouched.");
-    if p.has(Tool::Claude) && cfg!(target_os = "macos") {
-        println!("Claude Code's Keychain entry for this folder stays; keepapart never touches the Keychain.");
+    if keep_login {
+        println!("--keep-login: the official CLIs won't be asked to sign out first.");
+    } else {
+        println!("First, the official CLIs sign this profile out (`claude auth logout`, `codex logout`),");
+        println!(
+            "which also clears any OS keychain entry they made for it. keepapart never touches the keychain itself."
+        );
     }
-    println!(
-        "To sign out first: {}",
-        p.file
-            .tools
-            .iter()
-            .map(|t| match t {
-                Tool::Claude => format!("keepapart run {name} --tool claude -- auth logout"),
-                Tool::Codex => format!("keepapart run {name} --tool codex -- logout"),
-            })
-            .collect::<Vec<_>>()
-            .join(" ; ")
-    );
     if !yes {
         if !std::io::stdin().is_terminal() {
             bail!("not deleting without confirmation; pass --yes");
@@ -549,6 +624,21 @@ fn remove(store: &Store, name: &str, yes: bool) -> Result<i32> {
         if !ok {
             println!("Kept.");
             return Ok(1);
+        }
+    }
+    if !keep_login {
+        for &t in &p.file.tools {
+            let signed_in = p.login_file_present(t) || (t == Tool::Claude && cfg!(target_os = "macos"));
+            if !signed_in {
+                continue;
+            }
+            match launch::capture(&p, t, &launch::logout_args(t)) {
+                Ok(o) if o.status.success() => println!("Signed out of {} for {name:?}.", t.as_str()),
+                Ok(o) => {
+                    eprintln!("keepapart: {} logout said: {}", t.as_str(), String::from_utf8_lossy(&o.stderr).trim())
+                }
+                Err(e) => eprintln!("keepapart: couldn't run {} to sign out ({e:#}); deleting anyway", t.as_str()),
+            }
         }
     }
     store.remove(name)?;
@@ -603,5 +693,73 @@ fn pick(store: &Store, cwd: &std::path::Path) -> Result<i32> {
     } else {
         p.file.tools[0]
     };
-    launch::run(p, tool, &[])
+    launch_profile(store, p, tool, &[], false)
+}
+
+/// Launch a profile: refresh its copied shared items first (a no-op where
+/// shared items are links), then hand over to the official CLI.
+fn launch_profile(store: &Store, p: &Profile, t: Tool, args: &[OsString], clean_env: bool) -> Result<i32> {
+    match share::sync_copies(store, p) {
+        Ok(ch) if !ch.is_empty() => eprintln!("keepapart: refreshed shared copies: {}", ch.join(", ")),
+        Ok(_) => {}
+        Err(e) => eprintln!("keepapart: couldn't refresh shared copies: {e:#}"),
+    }
+    if let Ok((path, launch::Found::InstallerDir)) = launch::locate(t) {
+        eprintln!("keepapart: note: {}", launch::path_advice(t, &path));
+    }
+    launch::run(p, t, args, clean_env)
+}
+
+fn mcp_sync(store: &Store, only: Option<&str>) -> Result<i32> {
+    let mut profiles = match only {
+        Some(n) => vec![store.find(n)?],
+        None => store.list()?,
+    };
+    profiles.retain(|p| p.has(Tool::Claude));
+    if profiles.is_empty() {
+        println!("No Claude profiles to update.");
+        return Ok(0);
+    }
+    if launch::program_path(Tool::Claude).is_err() {
+        bail!(
+            "`claude` isn't installed, so profiles can't be updated yet. Run `keepapart mcp sync` after installing it"
+        );
+    }
+    for mut p in profiles {
+        let log = mcp::sync_profile(store, &mut p)?;
+        println!("  {}: {}", p.name(), if log.is_empty() { "nothing to do".into() } else { log.join(", ") });
+    }
+    Ok(0)
+}
+
+fn mcp_cmd(store: &Store, cmd: McpCmd) -> Result<i32> {
+    match cmd {
+        McpCmd::Add { name, json } => {
+            mcp::add(store, &name, &json)?;
+            println!(
+                "Sharing MCP server {name:?}. Installing it in each Claude profile (claude mcp add-json --scope user):"
+            );
+            mcp_sync(store, None)
+        }
+        McpCmd::Remove { name } => {
+            if !mcp::remove(store, &name)? {
+                bail!("no shared MCP server named {name:?}");
+            }
+            println!("Stopped sharing {name:?}. Removing it from the profiles keepapart added it to:");
+            mcp_sync(store, None)
+        }
+        McpCmd::List => {
+            let m = mcp::load(store)?;
+            if m.is_empty() {
+                println!("No shared MCP servers. Add one: keepapart mcp add <name> '<json>'");
+            }
+            for (name, cfg) in m {
+                let what = cfg.get("command").or_else(|| cfg.get("url")).and_then(|v| v.as_str()).unwrap_or("?");
+                println!("  {name:20} {what}");
+            }
+            println!("(stored in {})", mcp::path(store).display());
+            Ok(0)
+        }
+        McpCmd::Sync { profile } => mcp_sync(store, profile.as_deref()),
+    }
 }

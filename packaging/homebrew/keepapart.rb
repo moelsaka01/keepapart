@@ -1,30 +1,30 @@
-# Homebrew formula for a tap (moelsaka01/homebrew-tap). Fill in the sha256
-# values from the release's .sha256 files after tagging.
+# Template: the release workflow renders it with real sha256 values (packaging/render.py)
+# and attaches keepapart.rb to the GitHub release, ready for moelsaka01/homebrew-tap.
 class Keepapart < Formula
   desc "One machine, many Claude & Codex accounts. Work, personal, clients, kept apart"
   homepage "https://github.com/moelsaka01/keepapart"
-  version "0.1.0"
+  version "{{VERSION}}"
   license "MIT"
 
   on_macos do
     on_arm do
-      url "https://github.com/moelsaka01/keepapart/releases/download/v0.1.0/keepapart-v0.1.0-aarch64-apple-darwin.tar.gz"
-      sha256 "REPLACE_WITH_SHA256_FROM_RELEASE"
+      url "https://github.com/moelsaka01/keepapart/releases/download/v{{VERSION}}/keepapart-v{{VERSION}}-aarch64-apple-darwin.tar.gz"
+      sha256 "{{SHA256:aarch64-apple-darwin}}"
     end
     on_intel do
-      url "https://github.com/moelsaka01/keepapart/releases/download/v0.1.0/keepapart-v0.1.0-x86_64-apple-darwin.tar.gz"
-      sha256 "REPLACE_WITH_SHA256_FROM_RELEASE"
+      url "https://github.com/moelsaka01/keepapart/releases/download/v{{VERSION}}/keepapart-v{{VERSION}}-x86_64-apple-darwin.tar.gz"
+      sha256 "{{SHA256:x86_64-apple-darwin}}"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/moelsaka01/keepapart/releases/download/v0.1.0/keepapart-v0.1.0-aarch64-unknown-linux-musl.tar.gz"
-      sha256 "REPLACE_WITH_SHA256_FROM_RELEASE"
+      url "https://github.com/moelsaka01/keepapart/releases/download/v{{VERSION}}/keepapart-v{{VERSION}}-aarch64-unknown-linux-musl.tar.gz"
+      sha256 "{{SHA256:aarch64-unknown-linux-musl}}"
     end
     on_intel do
-      url "https://github.com/moelsaka01/keepapart/releases/download/v0.1.0/keepapart-v0.1.0-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "REPLACE_WITH_SHA256_FROM_RELEASE"
+      url "https://github.com/moelsaka01/keepapart/releases/download/v{{VERSION}}/keepapart-v{{VERSION}}-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "{{SHA256:x86_64-unknown-linux-musl}}"
     end
   end
 

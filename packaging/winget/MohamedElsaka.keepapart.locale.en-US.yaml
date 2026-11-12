@@ -1,5 +1,5 @@
 PackageIdentifier: MohamedElsaka.keepapart
-PackageVersion: 0.1.0
+PackageVersion: {{VERSION}}
 PackageLocale: en-US
 Publisher: Mohamed Elsaka
 PackageName: keepapart

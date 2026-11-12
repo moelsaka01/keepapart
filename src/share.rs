@@ -400,6 +400,98 @@ pub fn state(store: &Store, p: &Profile, item: &Item) -> ItemState {
     }
 }
 
+fn mtime(p: &Path) -> Option<std::time::SystemTime> {
+    fs::metadata(p).and_then(|m| m.modified()).ok()
+}
+
+/// Two-way sync of one file: if the contents differ, the newer one wins.
+fn sync_file(a: &Path, b: &Path) -> Result<bool> {
+    match (a.is_file(), b.is_file()) {
+        (true, false) => copy_any(a, b).map(|_| true),
+        (false, true) => copy_any(b, a).map(|_| true),
+        (true, true) => {
+            if fs::read(a)? == fs::read(b)? {
+                return Ok(false);
+            }
+            if mtime(a) >= mtime(b) {
+                copy_any(a, b)?;
+            } else {
+                copy_any(b, a)?;
+            }
+            Ok(true)
+        }
+        (false, false) => Ok(false),
+    }
+}
+
+/// Two-way sync of a folder tree, newest file wins. Deletions aren't
+/// propagated (a file missing on one side is copied back), and links are skipped.
+fn sync_tree(a: &Path, b: &Path) -> Result<bool> {
+    fs::create_dir_all(a)?;
+    fs::create_dir_all(b)?;
+    let mut names = std::collections::BTreeSet::new();
+    for dir in [a, b] {
+        for e in fs::read_dir(dir)? {
+            let e = e?;
+            if !e.file_type()?.is_symlink() {
+                names.insert(e.file_name());
+            }
+        }
+    }
+    let mut changed = false;
+    for n in names {
+        let (x, y) = (a.join(&n), b.join(&n));
+        if x.is_dir() || y.is_dir() {
+            changed |= sync_tree(&x, &y)?;
+        } else {
+            changed |= sync_file(&x, &y)?;
+        }
+    }
+    Ok(changed)
+}
+
+/// Bring a profile's copied (not linked) shared items and the shared store
+/// level with each other, newest wins. Runs before every `keepapart run`, so
+/// copies on Windows without symlink rights stay current at each launch.
+pub fn sync_copies(store: &Store, p: &Profile) -> Result<Vec<String>> {
+    let mut changed = Vec::new();
+    for e in p.file.shared.iter().filter(|e| e.mode == LinkMode::Copy) {
+        let item = lookup(&e.item)?;
+        let (mine, shared) = (profile_path(p, item), shared_path(store, item));
+        let did = match item.kind {
+            Kind::File => sync_file(&mine, &shared)?,
+            Kind::Dir => sync_tree(&mine, &shared)?,
+        };
+        if did {
+            changed.push(e.item.clone());
+        }
+    }
+    Ok(changed)
+}
+
+/// Sync every profile's copies. Two passes, so an edit made in one profile
+/// reaches all the others.
+pub fn sync_all(store: &Store) -> Result<Vec<(String, Vec<String>)>> {
+    let profiles = store.list()?;
+    let mut report: Vec<(String, Vec<String>)> = Vec::new();
+    for _ in 0..2 {
+        for p in &profiles {
+            let ch = sync_copies(store, p)?;
+            if !ch.is_empty() {
+                match report.iter_mut().find(|(n, _)| n == p.name()) {
+                    Some((_, v)) => v.extend(ch),
+                    None => report.push((p.name().to_string(), ch)),
+                }
+            }
+        }
+    }
+    for (_, v) in report.iter_mut() {
+        v.sort();
+        v.dedup();
+    }
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
