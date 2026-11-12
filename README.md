@@ -57,7 +57,7 @@ You also need the official CLIs you plan to use: [Claude Code](https://code.clau
 ## Try it in 30 seconds
 
 ```bash
-keepapart add work --tool both     # creates the profile, then opens claude and `codex login` so you can sign in
+keepapart add work --tool both     # creates the profile, then runs `claude auth login` and `codex login`
 keepapart add personal             # Claude only (the default)
 
 keepapart run work                 # terminal 1: Claude Code as your work account
@@ -123,6 +123,8 @@ keepapart sets **two documented variables** and starts the real CLI. That's all 
     └── codex/{skills,prompts,AGENTS.md}
 ```
 
+**Tested live on Windows 11** with Claude Code 2.1.322 and Codex 0.167.2: two logged-in profiles ran side by side, logging one out left the other signed in, and the machine's own `~/.claude` and `~/.codex` logins were untouched. Full log: [docs/windows-test.md](docs/windows-test.md).
+
 Where each official CLI stores the login it creates, and why a separate folder keeps it separate (checked against current docs and source, November 2026):
 
 | | Windows | macOS | Linux |
@@ -176,7 +178,7 @@ The hook only sets or unsets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `KEEPAPART_AC
 
 ## Security
 
-- **keepapart never reads, copies, exports or moves credentials.** Logins are created by the official CLI (`claude` → `/login`, `codex login`), in that profile's folder, by the CLI's own code.
+- **keepapart never reads, copies, exports or moves credentials.** Logins are created by the official CLI (`claude auth login`, `codex login`), in that profile's folder, by the CLI's own code.
 - **It never touches the OS keychain** or the Windows Credential Manager.
 - The only thing it checks about a login is **whether the login file exists** (for `list` / `doctor`). It never opens it.
 - **No network calls, no telemetry, no update checks.** It doesn't show usage or limits, because that would mean using your token or calling unofficial endpoints. Run `/usage` in Claude Code or `/status` in Codex instead.
@@ -205,6 +207,12 @@ Pick claude-swap, clauth or ccswap if you want usage dashboards. Pick keepapart 
 
 **Is using several accounts allowed?**
 Having separate accounts for separate purposes (an employer's seat and a personal plan, or a seat per client) is the normal case this tool is built for. Using extra accounts to get around usage limits is not, and keepapart won't help with it. Check each provider's terms for your situation.
+
+**Which account is a profile signed in to?**
+Ask the official CLI: `keepapart run work -- auth status --text` (Claude) or `keepapart run work --tool codex -- login status` (Codex).
+
+**`claude` isn't found on Windows, but I just installed it.**
+The native installer puts it in `%USERPROFILE%\.localin` and doesn't add that folder to PATH. `keepapart doctor` spots this and tells you which folder to add.
 
 **Will this log me out of my normal `~/.claude`?**
 No. keepapart never touches `~/.claude` or `~/.codex`. Plain `claude` keeps working as before unless you install the shell hook.

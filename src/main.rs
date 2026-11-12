@@ -46,6 +46,9 @@ enum Cmd {
         name: String,
         #[arg(long, short, value_enum)]
         tool: Option<Tool>,
+        /// Extra arguments for the login command, after -- (e.g. -- --sso)
+        #[arg(last = true)]
+        args: Vec<OsString>,
     },
     /// Launch claude or codex with a profile. Several can run at once.
     #[command(alias = "r")]
@@ -143,7 +146,7 @@ fn real_main() -> Result<i32> {
     match cli.cmd {
         None => pick(&store, &cwd),
         Some(Cmd::Add { name, tool, isolated, no_login }) => add(&store, &name, tool, isolated, no_login),
-        Some(Cmd::Login { name, tool }) => {
+        Some(Cmd::Login { name, tool, args }) => {
             let p = store.find(&name)?;
             let tools = match tool {
                 Some(t) => vec![t],
@@ -157,7 +160,7 @@ fn real_main() -> Result<i32> {
                         t.as_str()
                     );
                 }
-                login(&p, t)?;
+                login(&p, t, &args)?;
             }
             Ok(0)
         }
@@ -280,20 +283,18 @@ fn pick_tool(p: &Profile, tool: Option<Tool>) -> Result<Tool> {
     }
 }
 
-fn login(p: &Profile, t: Tool) -> Result<()> {
+fn login(p: &Profile, t: Tool, extra: &[OsString]) -> Result<()> {
+    let mut args = launch::login_args(t);
+    args.extend(extra.iter().cloned());
     println!();
-    match t {
-        Tool::Claude => {
-            println!("Starting Claude Code as profile {:?}.", p.name());
-            println!("Log in with the account for this profile (it asks on first start; otherwise type /login),");
-            println!("then type /exit to come back here.");
-        }
-        Tool::Codex => {
-            println!("Running `codex login` as profile {:?}. Sign in with the account for this profile.", p.name());
-        }
-    }
+    println!(
+        "Running `{} {}` as profile {:?}. Sign in with the account for this profile.",
+        t.program(),
+        args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "),
+        p.name()
+    );
     println!("Login is handled entirely by the official CLI. keepapart never sees it.\n");
-    let code = launch::run_wait(p, t, &launch::login_args(t))?;
+    let code = launch::run_wait(p, t, &args)?;
     if code != 0 {
         eprintln!("keepapart: {} exited with code {code}; run `keepapart login {}` to try again", t.as_str(), p.name());
     }
@@ -354,7 +355,7 @@ fn add(store: &Store, name: &str, choice: ToolChoice, isolated: bool, no_login: 
             );
             continue;
         }
-        login(&p, t)?;
+        login(&p, t, &[])?;
     }
     println!("\nDone. Start it with: keepapart run {name}");
     Ok(0)
@@ -528,8 +529,16 @@ fn remove(store: &Store, name: &str, yes: bool) -> Result<i32> {
         println!("Claude Code's Keychain entry for this folder stays; keepapart never touches the Keychain.");
     }
     println!(
-        "To sign out on the server first: keepapart run {name} (then /logout){}",
-        if p.has(Tool::Codex) { format!(", and keepapart run {name} --tool codex -- logout") } else { String::new() }
+        "To sign out first: {}",
+        p.file
+            .tools
+            .iter()
+            .map(|t| match t {
+                Tool::Claude => format!("keepapart run {name} --tool claude -- auth logout"),
+                Tool::Codex => format!("keepapart run {name} --tool codex -- logout"),
+            })
+            .collect::<Vec<_>>()
+            .join(" ; ")
     );
     if !yes {
         if !std::io::stdin().is_terminal() {

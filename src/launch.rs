@@ -14,20 +14,45 @@ use std::process::Command;
 /// Where the official CLI lives: `$KEEPAPART_CLAUDE_BIN` / `$KEEPAPART_CODEX_BIN`,
 /// else PATH (with PATHEXT on Windows, so `claude.cmd` from npm works too).
 pub fn program_path(tool: Tool) -> Result<PathBuf> {
-    let var = match tool {
-        Tool::Claude => "KEEPAPART_CLAUDE_BIN",
-        Tool::Codex => "KEEPAPART_CODEX_BIN",
-    };
+    let var = bin_override_var(tool);
     if let Some(p) = std::env::var_os(var).filter(|v| !v.is_empty()) {
         return Ok(PathBuf::from(p));
     }
-    which::which(tool.program()).with_context(|| {
-        let how = match tool {
-            Tool::Claude => "https://code.claude.com/docs/en/setup",
-            Tool::Codex => "https://developers.openai.com/codex/cli",
-        };
-        format!("`{}` isn't on your PATH. Install it first: {how}", tool.program())
-    })
+    which::which(tool.program()).map_err(|_| anyhow::anyhow!(not_found(tool)))
+}
+
+fn not_found(tool: Tool) -> String {
+    let var = bin_override_var(tool);
+    if let Some(found) = installed_off_path(tool) {
+        return format!(
+            "`{}` is installed at {} but that folder isn't on your PATH. Add {} to your PATH{}, or set {var} to the full path",
+            tool.program(),
+            found.display(),
+            found.parent().map(|p| p.display().to_string()).unwrap_or_default(),
+            if cfg!(windows) { " (Start > \"Edit environment variables for your account\" > Path)" } else { "" },
+        );
+    }
+    let how = match tool {
+        Tool::Claude => "https://code.claude.com/docs/en/setup",
+        Tool::Codex => "https://developers.openai.com/codex/cli",
+    };
+    format!("`{}` isn't on your PATH. Install it first: {how}", tool.program())
+}
+
+pub fn bin_override_var(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Claude => "KEEPAPART_CLAUDE_BIN",
+        Tool::Codex => "KEEPAPART_CODEX_BIN",
+    }
+}
+
+/// The official native installers put the CLI in `~/.local/bin`, which often
+/// isn't on PATH yet (the Claude Code installer says so on Windows).
+pub fn installed_off_path(tool: Tool) -> Option<PathBuf> {
+    let dir = dirs::home_dir()?.join(".local").join("bin");
+    let name = if cfg!(windows) { format!("{}.exe", tool.program()) } else { tool.program().to_string() };
+    let p = dir.join(name);
+    p.is_file().then_some(p)
 }
 
 /// The environment a profile adds. Both tool variables are set when the
@@ -108,12 +133,10 @@ pub fn run_wait(p: &Profile, tool: Tool, args: &[OsString]) -> Result<i32> {
     Ok(status.code().unwrap_or(1))
 }
 
-/// How to log in with the official CLI. Claude Code asks you to log in on the
-/// first start in an empty config folder (or type /login). Codex has a
-/// `login` subcommand.
+/// The official login commands: `claude auth login` and `codex login`.
 pub fn login_args(tool: Tool) -> Vec<OsString> {
     match tool {
-        Tool::Claude => vec![],
+        Tool::Claude => vec!["auth".into(), "login".into()],
         Tool::Codex => vec!["login".into()],
     }
 }

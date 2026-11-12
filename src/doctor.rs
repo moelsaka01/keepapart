@@ -86,9 +86,14 @@ pub fn run(store: &Store) -> Result<Doctor> {
                     .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "version unknown".into());
-                d.ok(format!("{}: {} ({version})", t.program(), path.display()));
+                let via = if std::env::var_os(crate::launch::bin_override_var(t)).is_some_and(|v| !v.is_empty()) {
+                    format!(", from ${}", crate::launch::bin_override_var(t))
+                } else {
+                    String::new()
+                };
+                d.ok(format!("{}: {} ({version}{via})", t.program(), path.display()));
             }
-            Err(_) if used => d.fail(format!("{} isn't on PATH, but a profile uses it", t.program())),
+            Err(e) if used => d.fail(format!("{e:#}")),
             Err(_) => d.info(format!("{} isn't on PATH (no profile uses it)", t.program())),
         }
     }
@@ -172,14 +177,13 @@ pub fn run(store: &Store) -> Result<Doctor> {
                     ));
                 }
             }
-            let login = if p.login_file_present(t) {
-                "login file present".to_string()
+            if p.login_file_present(t) {
+                d.ok(format!("{}: own folder, login file present", t.as_str()));
             } else if t == Tool::Claude && cfg!(target_os = "macos") {
-                "login kept in the macOS Keychain, keyed to this folder".to_string()
+                d.ok(format!("{}: own folder, login kept in the macOS Keychain, keyed to this folder", t.as_str()));
             } else {
-                format!("not logged in yet: keepapart login {}", p.name())
-            };
-            d.ok(format!("{}: own folder, {login}", t.as_str()));
+                d.info(format!("{}: own folder, not logged in: keepapart login {}", t.as_str(), p.name()));
+            }
 
             for item in CATALOG.iter().filter(|i| i.tool == t) {
                 match share::state(store, p, item) {
