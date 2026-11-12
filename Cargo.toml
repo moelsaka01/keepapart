@@ -1,0 +1,41 @@
+[package]
+name = "keepapart"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "One machine, many Claude & Codex accounts. Work, personal, clients, kept apart."
+license = "MIT"
+repository = "https://github.com/moelsaka01/keepapart"
+readme = "README.md"
+keywords = ["claude", "codex", "accounts", "profiles", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+authors = ["Mohamed Elsaka"]
+
+[[bin]]
+name = "keepapart"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+dialoguer = { version = "0.11", default-features = false }
+dirs = "5"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+toml = "0.8"
+which = "6"
+
+[target.'cfg(windows)'.dependencies]
+ctrlc = "3.4"
+junction = "1"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "z"

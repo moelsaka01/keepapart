@@ -1,0 +1,16 @@
+PackageIdentifier: MohamedElsaka.keepapart
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: Mohamed Elsaka
+PackageName: keepapart
+License: MIT
+LicenseUrl: https://github.com/moelsaka01/keepapart/blob/main/LICENSE
+ShortDescription: One machine, many Claude & Codex accounts. Work, personal, clients, kept apart.
+PackageUrl: https://github.com/moelsaka01/keepapart
+Tags:
+  - claude
+  - codex
+  - cli
+  - profiles
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

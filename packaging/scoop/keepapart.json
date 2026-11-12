@@ -1,0 +1,33 @@
+{
+    "version": "0.1.0",
+    "description": "One machine, many Claude & Codex accounts. Work, personal, clients, kept apart.",
+    "homepage": "https://github.com/moelsaka01/keepapart",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/moelsaka01/keepapart/releases/download/v0.1.0/keepapart-v0.1.0-x86_64-pc-windows-msvc.zip",
+            "hash": "REPLACE_WITH_SHA256_FROM_RELEASE",
+            "extract_dir": "keepapart-v0.1.0-x86_64-pc-windows-msvc"
+        },
+        "arm64": {
+            "url": "https://github.com/moelsaka01/keepapart/releases/download/v0.1.0/keepapart-v0.1.0-aarch64-pc-windows-msvc.zip",
+            "hash": "REPLACE_WITH_SHA256_FROM_RELEASE",
+            "extract_dir": "keepapart-v0.1.0-aarch64-pc-windows-msvc"
+        }
+    },
+    "bin": "keepapart.exe",
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/moelsaka01/keepapart/releases/download/v$version/keepapart-v$version-x86_64-pc-windows-msvc.zip",
+                "extract_dir": "keepapart-v$version-x86_64-pc-windows-msvc"
+            },
+            "arm64": {
+                "url": "https://github.com/moelsaka01/keepapart/releases/download/v$version/keepapart-v$version-aarch64-pc-windows-msvc.zip",
+                "extract_dir": "keepapart-v$version-aarch64-pc-windows-msvc"
+            }
+        },
+        "hash": { "url": "$url.sha256" }
+    }
+}
