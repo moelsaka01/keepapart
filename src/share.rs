@@ -181,6 +181,14 @@ pub fn copy_any(src: &Path, dst: &Path) -> Result<()> {
             fs::create_dir_all(p)?;
         }
         fs::copy(src, dst).with_context(|| format!("copying {} to {}", src.display(), dst.display()))?;
+        // Keep the source's modified time. Windows does this already; Linux
+        // and macOS stamp the copy "now", which would make newest-wins sync
+        // treat an old edit as the latest one.
+        if let Ok(t) = meta.modified() {
+            if let Ok(f) = fs::OpenOptions::new().write(true).open(dst) {
+                let _ = f.set_modified(t);
+            }
+        }
     }
     Ok(())
 }
