@@ -212,7 +212,7 @@ Having separate accounts for separate purposes (an employer's seat and a persona
 Ask the official CLI: `keepapart run work -- auth status --text` (Claude) or `keepapart run work --tool codex -- login status` (Codex).
 
 **`claude` isn't found on Windows, but I just installed it.**
-The native installer puts it in `%USERPROFILE%\.localin` and doesn't add that folder to PATH. `keepapart doctor` spots this and tells you which folder to add.
+The native installer puts it in `%USERPROFILE%\.local\bin` and doesn't add that folder to PATH. `keepapart doctor` spots this and tells you which folder to add.
 
 **Will this log me out of my normal `~/.claude`?**
 No. keepapart never touches `~/.claude` or `~/.codex`. Plain `claude` keeps working as before unless you install the shell hook.
