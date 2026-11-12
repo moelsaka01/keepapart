@@ -128,7 +128,7 @@ keepapart sets **two documented variables** and starts the real CLI. That's all 
     └── codex/{skills,prompts,AGENTS.md}
 ```
 
-**Tested live on Windows 11** with Claude Code 2.1.322 and Codex 0.167.2: two logged-in profiles ran side by side, logging one out left the other signed in, and the machine's own `~/.claude` and `~/.codex` logins were untouched. Full log: [docs/windows-test.md](docs/windows-test.md).
+**Tested live on Windows 11** with Claude Code 2.1.322 and Codex 0.167.2, for both CLIs: two logged-in profiles ran side by side, logging one out left the other signed in, and the machine's own `~/.claude` and `~/.codex` logins were untouched. Full log: [docs/windows-test.md](docs/windows-test.md).
 
 Where each official CLI stores the login it creates, and why a separate folder keeps it separate (checked against current docs and source, November 2026):
 
@@ -237,6 +237,9 @@ Ask the official CLI: `keepapart run work -- auth status --text` (Claude) or `ke
 
 **`claude` isn't found on Windows, but I just installed it.**
 The native installer puts it in `%USERPROFILE%\.local\bin` and doesn't add that folder to PATH. keepapart still finds it there, and `keepapart doctor` tells you which folder to add so plain `claude` works too.
+
+**`codex login` never finishes after I sign in.**
+Codex's browser login redirects to `127.0.0.1:1455`, so open the link it prints in a browser **on the same machine**. Any browser works. From another device, use `keepapart login <name> --tool codex -- --device-auth`, which needs device-code sign-in turned on in ChatGPT's security settings.
 
 **Will this log me out of my normal `~/.claude`?**
 No. keepapart never touches `~/.claude` or `~/.codex`. Plain `claude` keeps working as before unless you install the shell hook.

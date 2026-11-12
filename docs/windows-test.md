@@ -76,18 +76,44 @@ work still signed in
 ~/.claude/.credentials.json                           size=554  mtime=10:57:43   (unchanged)
 ```
 
-## 4. Codex
+## 4. Codex: two logins, side by side, logout
 
 ```text
-> keepapart add work --tool codex --no-login
-Added codex to profile "work".
-> codex login status                                   # the normal ~/.codex
-Logged in using ChatGPT
-> keepapart run work --tool codex -- login status      # CODEX_HOME=~/.keepapart/profiles/work/codex
-Not logged in
+> keepapart add work --tool codex --no-login        # adds Codex to the existing profiles
+> keepapart add personal --tool codex --no-login
+> keepapart login personal --tool codex             # `codex login`, browser on this PC
+Successfully logged in
+> keepapart login work --tool codex
+Successfully logged in
+
+work:             Logged in using ChatGPT
+personal:         Logged in using ChatGPT
+default ~/.codex: Logged in using ChatGPT            (the machine's own login, untouched)
 ```
 
-The machine's existing Codex login is not visible inside the profile. A second Codex login wasn't done in this run. The Codex isolation path is also covered by the end-to-end tests.
+Both at the same moment (`codex exec`, one short prompt each):
+
+```text
+[work]     start=12:15:09.061 end=12:15:17.490 reply=hello from the work profile
+[personal] start=12:15:09.095 end=12:15:17.669 reply=hello from the personal profile
+work: 1 session file(s)        personal: 1 session file(s)        (each in its own CODEX_HOME)
+```
+
+Logging one out:
+
+```text
+> keepapart run personal --tool codex -- logout
+Successfully logged out
+work:             Logged in using ChatGPT
+personal:         Not logged in
+default ~/.codex: Logged in using ChatGPT
+
+~/.keepapart/profiles/work/codex/auth.json   size=4084  mtime=12:13:47   (unchanged)
+~/.keepapart/profiles/personal/codex/auth.json   (gone: removed by Codex's own logout)
+~/.codex/auth.json                           size=4128  mtime=2026-11-01   (unchanged)
+```
+
+Note: the browser login only completes when the link `codex login` prints is opened **on the same PC**, because it redirects to `127.0.0.1:1455`. A first attempt in a browser elsewhere never reached it. `codex login --device-auth` works from any device but needs device-code sign-in turned on in ChatGPT's security settings, so we didn't use it.
 
 ## 5. doctor
 
@@ -108,7 +134,36 @@ Profiles
 
 This machine has symlink rights (Developer Mode). The junction and copy fallback for accounts without them is covered by `tests/cli.rs` (`without_symlink_rights_…`), which runs on Windows in CI.
 
+## 6. Shared MCP servers, through the official CLI
+
+```text
+> keepapart mcp add keepapart-demo '{"command":"node","args":["-e","0"]}'
+  personal: added keepapart-demo
+  work: added keepapart-demo
+> keepapart run work -- mcp get keepapart-demo
+keepapart-demo:
+  Scope: User config (available in all your projects)
+  Type: stdio
+  Command: node
+> claude mcp get keepapart-demo                          # the normal ~/.claude, not a profile
+No MCP server named "keepapart-demo".
+> keepapart mcp remove keepapart-demo
+  personal: removed keepapart-demo
+  work: removed keepapart-demo
+```
+
+("Failed to connect" in `mcp get` is expected: the demo server exits at once.)
+
+## 7. Everything else
+
+- **PATH fallback:** with `claude` not on PATH and no override, `keepapart run work -- auth status` found `~\.local\bin\claude.exe`, printed which folder to add to PATH, and ran it.
+- **Picker:** `keepapart` with no arguments listed both profiles (`personal  claude+codex`, `work  claude+codex`); Ctrl-C returned to the prompt.
+- **Shell hooks:** the PowerShell hook in Windows PowerShell 5.1 and the bash hook in Git Bash both set the profile's folders inside a pinned folder and cleared them outside it.
+
 ## Found during the test, fixed
 
 - The Claude Code native installer puts `claude.exe` in `~\.local\bin` and doesn't add that folder to PATH. keepapart now spots this and says exactly which folder to add, instead of just "not on PATH".
 - `keepapart login` now uses the official `claude auth login` command instead of opening a full session.
+- Windows Defender blocked the first PowerShell hook (it used `Invoke-Expression`). The hook now runs no generated code: it is dot-sourced from a file and applies plain `set`/`unset` lines.
+- Piping keepapart's output into `head` made it panic on the closed pipe. It now exits quietly.
+- Tests could reach the real `claude.exe` through the new PATH fallback. They now run with a throwaway home folder.
