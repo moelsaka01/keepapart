@@ -51,14 +51,15 @@ Claude Code and Codex keep **one login per machine**. Supporting several account
 **Windows ([Scoop](https://scoop.sh))**
 
 ```powershell
-scoop bucket add moelsaka01 https://github.com/moelsaka01/scoop-bucket
-scoop install keepapart
+scoop bucket add keepapart https://github.com/moelsaka01/keepapart
+scoop install keepapart/keepapart
 ```
 
 **macOS / Linux ([Homebrew](https://brew.sh))**
 
 ```bash
-brew install moelsaka01/tap/keepapart
+brew tap moelsaka01/keepapart https://github.com/moelsaka01/keepapart
+brew install keepapart
 ```
 
 | Other ways | Command |
@@ -67,7 +68,7 @@ brew install moelsaka01/tap/keepapart
 | Prebuilt binary | download the `.zip` (Windows) or `.tar.gz` (macOS / Linux, x64 and ARM64) from [Releases](https://github.com/moelsaka01/keepapart/releases) and put `keepapart` on your PATH. Each has a `.sha256` next to it |
 | winget | coming once the manifest is accepted into `microsoft/winget-pkgs` |
 
-The Scoop bucket and the Homebrew tap install the release binaries with checksums that the release workflow fills in. Each repo's CI installs keepapart on a fresh machine.
+Both come from this repo: the Scoop manifest is in [`bucket/`](bucket/) and the Homebrew formula in [`Formula/`](Formula/). Each release updates them with the new version and real checksums, and CI then installs keepapart through both on fresh Windows, macOS and Linux machines. `scoop update` and `brew upgrade` pick up new versions.
 
 You also need the official CLIs you plan to use: [Claude Code](https://code.claude.com/docs/en/setup) and/or [Codex](https://developers.openai.com/codex/cli). If the Claude Code installer left `claude` in `~/.local/bin` without adding it to PATH, keepapart still finds it there and tells you how to fix PATH.
 

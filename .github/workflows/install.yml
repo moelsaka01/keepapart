@@ -1,0 +1,82 @@
+name: install
+
+# Installs keepapart the way users do, from this repo's Scoop bucket (bucket/)
+# and Homebrew formula (Formula/), on fresh runners. Runs when those files
+# change, by hand, and from release.yml right after a release updates them.
+
+on:
+  push:
+    branches: [main]
+    paths: ["bucket/**", "Formula/**", ".github/workflows/install.yml"]
+  pull_request:
+    paths: ["bucket/**", "Formula/**", ".github/workflows/install.yml"]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Branch or commit to install from"
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  scoop:
+    runs-on: windows-latest
+    env:
+      REF: ${{ inputs.ref || github.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.REF }}
+      - name: install Scoop
+        shell: pwsh
+        run: |
+          Invoke-RestMethod -Uri https://get.scoop.sh -OutFile install-scoop.ps1
+          .\install-scoop.ps1 -RunAsAdmin
+          Join-Path (Resolve-Path ~).Path "scoop\shims" >> $env:GITHUB_PATH
+      - name: install from this checkout's bucket/
+        shell: pwsh
+        run: |
+          scoop install bucket\keepapart.json
+          if ($LASTEXITCODE) { exit 1 }
+      - name: run it
+        shell: pwsh
+        run: |
+          keepapart --version
+          $env:KEEPAPART_HOME = "$env:RUNNER_TEMP\kp"
+          keepapart add demo --tool both --no-login
+          keepapart list
+      - name: the documented way (bucket add + install), from main
+        if: env.REF == 'main' || github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          scoop uninstall keepapart
+          scoop bucket add keepapart "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
+          scoop install keepapart/keepapart
+          if ($LASTEXITCODE) { exit 1 }
+          keepapart --version
+
+  brew:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      REF: ${{ inputs.ref || github.sha }}
+    steps:
+      - uses: Homebrew/actions/setup-homebrew@main
+      - name: tap this repo (the documented way) at the commit under test
+        run: |
+          brew tap moelsaka01/keepapart "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          cd "$(brew --repository moelsaka01/keepapart)"
+          git fetch -q origin "$REF" && git checkout -q FETCH_HEAD
+      - name: install and test
+        run: |
+          brew install moelsaka01/keepapart/keepapart
+          brew test keepapart
+          keepapart --version
+          KEEPAPART_HOME="$RUNNER_TEMP/kp" keepapart add demo --tool both --no-login
+          KEEPAPART_HOME="$RUNNER_TEMP/kp" keepapart list
