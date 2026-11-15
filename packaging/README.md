@@ -16,6 +16,6 @@ Templates for package managers. When a `v*` tag is pushed, the release workflow
 | Scoop | `scoop bucket add keepapart https://github.com/moelsaka01/keepapart` then `scoop install keepapart/keepapart` |
 | Homebrew | `brew tap moelsaka01/keepapart https://github.com/moelsaka01/keepapart` then `brew install keepapart` |
 | winget | PR the three `MohamedElsaka.keepapart*.yaml` files from the release to `microsoft/winget-pkgs` under `manifests/m/MohamedElsaka/keepapart/<version>/` (or `wingetcreate submit`) |
-| crates.io | set the `PUBLISH_CRATE` repo variable to `true` and add a `CARGO_REGISTRY_TOKEN` secret; or run `cargo publish` once |
+| crates.io | published: `cargo install keepapart`. For automatic publishing on release, set the `PUBLISH_CRATE` repo variable to `true` and add a `CARGO_REGISTRY_TOKEN` secret; otherwise run `cargo publish` after tagging |
 
 Try a render locally: `python packaging/render.py 0.1.0 <folder with archives + .sha256> out/`.

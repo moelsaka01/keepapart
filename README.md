@@ -7,6 +7,7 @@
 A single-binary CLI that gives each account its own Claude Code / Codex profile. The official CLIs handle the logins themselves. keepapart never touches your tokens.
 
 [![CI](https://github.com/moelsaka01/keepapart/actions/workflows/ci.yml/badge.svg)](https://github.com/moelsaka01/keepapart/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/keepapart)](https://crates.io/crates/keepapart)
 ![Platforms: Windows, macOS, Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 ![No telemetry](https://img.shields.io/badge/telemetry-none-brightgreen)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -64,9 +65,9 @@ brew install keepapart
 
 | Other ways | Command |
 |---|---|
-| Any OS, with Rust | `cargo install --git https://github.com/moelsaka01/keepapart --tag v0.1.0` |
+| Any OS, with Rust | `cargo install keepapart` ([crates.io](https://crates.io/crates/keepapart)) |
 | Prebuilt binary | download the `.zip` (Windows) or `.tar.gz` (macOS / Linux, x64 and ARM64) from [Releases](https://github.com/moelsaka01/keepapart/releases) and put `keepapart` on your PATH. Each has a `.sha256` next to it |
-| winget | coming once the manifest is accepted into `microsoft/winget-pkgs` |
+| winget | `winget install MohamedElsaka.keepapart` once [microsoft/winget-pkgs#480656](https://github.com/microsoft/winget-pkgs/pull/480656) is merged (in review) |
 
 Both come from this repo: the Scoop manifest is in [`bucket/`](bucket/) and the Homebrew formula in [`Formula/`](Formula/). Each release updates them with the new version and real checksums, and CI then installs keepapart through both on fresh Windows, macOS and Linux machines. `scoop update` and `brew upgrade` pick up new versions.
 
