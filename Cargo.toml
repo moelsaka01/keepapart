@@ -7,6 +7,7 @@ description = "One machine, many Claude & Codex accounts. Work, personal, client
 license = "MIT"
 repository = "https://github.com/moelsaka01/keepapart"
 readme = "README.md"
+include = ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "Cargo.lock", "/README.md", "/CHANGELOG.md", "/LICENSE"]
 keywords = ["claude", "codex", "accounts", "profiles", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 authors = ["Mohamed Elsaka"]

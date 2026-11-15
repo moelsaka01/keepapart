@@ -9,6 +9,7 @@ templates is filled in; a placeholder left unfilled is an error, so a recipe is
 never published with a missing or made-up checksum.
 """
 
+import datetime
 import pathlib
 import re
 import sys
@@ -40,6 +41,7 @@ def main() -> int:
 
     for rel in TEMPLATES:
         text = (here / rel).read_text(encoding="utf-8").replace("{{VERSION}}", version)
+        text = text.replace("{{DATE}}", datetime.date.today().isoformat())
 
         def fill(m: re.Match) -> str:
             target = m.group(1)
