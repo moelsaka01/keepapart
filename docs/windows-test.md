@@ -160,6 +160,39 @@ No MCP server named "keepapart-demo".
 - **Picker:** `keepapart` with no arguments listed both profiles (`personal  claude+codex`, `work  claude+codex`); Ctrl-C returned to the prompt.
 - **Shell hooks:** the PowerShell hook in Windows PowerShell 5.1 and the bash hook in Git Bash both set the profile's folders inside a pinned folder and cleared them outside it.
 
+## 8. Captures for the demo GIF (2026-11-21, keepapart 0.1.1)
+
+Both real profiles at once (`--model sonnet`, because the profiles' default model needs extra usage credits on a Pro plan):
+
+```text
+[work]     start=+0.00s end=+5.3s rc=0 reply='hello from the work profile'
+[personal] start=+0.00s end=+5.7s rc=0 reply='hello from the personal profile'
+```
+
+Each profile's own logins:
+
+```text
+> keepapart run work -- auth status --text            Login method: Claude Pro account / Email: m***@gmail.com
+> keepapart run personal -- auth status --text        Login method: Claude Pro account / Email: m***@gmail.com
+> keepapart run work --tool codex -- login status     Logged in using ChatGPT
+> keepapart run personal --tool codex -- login status Not logged in
+```
+
+Folder pinning, in a throwaway `KEEPAPART_HOME` (shown below as `~\.keepapart`, and the project folder as `~\codecme-app`):
+
+```text
+> keepapart use client-acme
+Wrote ~\codecme-app\.keepapart. `keepapart run` in this folder (and below) uses "client-acme".
+> keepapart status
+Profile: client-acme (from ~\codecme-app\.keepapart)
+  claude  CLAUDE_CONFIG_DIR=~\.keepapart\profiles\client-acme\claude
+  shared  claude:CLAUDE.md, claude:agents, claude:commands, claude:output-styles, claude:skills
+> keepapart list
+  NAME         TOOLS         LOGIN FILE                LAST USED
+* client-acme  claude        claude:no                 never
+  work         claude+codex  claude:no codex:no        never
+```
+
 ## Found during the test, fixed
 
 - The Claude Code native installer puts `claude.exe` in `~\.local\bin` and doesn't add that folder to PATH. keepapart now spots this and says exactly which folder to add, instead of just "not on PATH".

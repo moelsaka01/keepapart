@@ -13,9 +13,9 @@ A single-binary CLI that gives each account its own Claude Code / Codex profile.
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 <!-- Rendered by assets/make_demo.py from the commands and outputs in docs/windows-test.md -->
-![keepapart demo: two profiles answering side by side, then one is logged out while the other stays signed in](assets/demo.gif)
+![keepapart demo: two accounts answering side by side, separate logins per profile, and a client repo pinned to the client account](assets/demo.gif)
 
-<sub>Commands and outputs from the <a href="docs/windows-test.md">live Windows 11 test</a>, drawn as an animation by <a href="assets/make_demo.py">assets/make_demo.py</a> (not a screen recording).</sub>
+<sub>Real commands and output from Windows 11 (<a href="docs/windows-test.md">full log</a>), drawn as an animation by <a href="assets/make_demo.py">assets/make_demo.py</a>. It's not a screen recording; the email is masked and waits are shortened. <a href="assets/demo.mp4">MP4 version</a>.</sub>
 
 </div>
 
