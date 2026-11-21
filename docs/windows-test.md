@@ -178,13 +178,13 @@ Each profile's own logins:
 > keepapart run personal --tool codex -- login status Not logged in
 ```
 
-Folder pinning, in a throwaway `KEEPAPART_HOME` (shown below as `~\.keepapart`, and the project folder as `~\codecme-app`):
+Folder pinning, in a throwaway `KEEPAPART_HOME` (shown below as `~\.keepapart`, and the project folder as `~\code\acme-app`):
 
 ```text
 > keepapart use client-acme
-Wrote ~\codecme-app\.keepapart. `keepapart run` in this folder (and below) uses "client-acme".
+Wrote ~\code\acme-app\.keepapart. `keepapart run` in this folder (and below) uses "client-acme".
 > keepapart status
-Profile: client-acme (from ~\codecme-app\.keepapart)
+Profile: client-acme (from ~\code\acme-app\.keepapart)
   claude  CLAUDE_CONFIG_DIR=~\.keepapart\profiles\client-acme\claude
   shared  claude:CLAUDE.md, claude:agents, claude:commands, claude:output-styles, claude:skills
 > keepapart list
