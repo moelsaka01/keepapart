@@ -193,6 +193,24 @@ Profile: client-acme (from ~\code\acme-app\.keepapart)
   work         claude+codex  claude:no codex:no        never
 ```
 
+## 9. More AI CLIs (2026-11-23, keepapart 0.2.0 dev build)
+
+The seven npm-distributed CLIs were installed into a throwaway folder (not globally): Gemini CLI 0.70.0, Qwen Code 0.28.4, Kimi Code CLI 2.7.2, Cline CLI 3.0.75, Continue CLI 1.5.47, Crush 0.102.0, OpenCode 1.19.6. Each was run **through keepapart** with a command that writes or reports its own state, without logging in. Paths are shortened to `<kp>` = a throwaway `KEEPAPART_HOME`.
+
+| Tool | Command (via `keepapart run <profile> --tool <tool> -- ...`) | Where its state went | Your normal folder |
+|---|---|---|---|
+| Crush | `dirs` | `w1`: `<kp>/profiles/w1/crush/config`, `.../crush/data`; `w2`: `<kp>/profiles/w2/crush/...` | `~/.config/crush` never created |
+| OpenCode | `debug paths` | data `<kp>/profiles/w1/opencode/data/opencode`, state `.../state/opencode` (config and cache stay shared, by design) | untouched |
+| Gemini CLI | `mcp add --scope user kp-probe node` | written to `<kp>/profiles/w1/gemini/.gemini/settings.json` | no `~/.gemini/settings.json` |
+| Qwen Code | `mcp add --scope user kp-probe node` | `<kp>/profiles/w1/qwen/settings.json` | `~/.qwen` never created |
+| Kimi Code CLI | `doctor` | reports its config at `<kp>/profiles/w1/kimi/config.toml` | `~/.kimi-code` never created |
+| Cline CLI | `config` | created `<kp>/profiles/w1/cline/data/{settings,logs,cache}` | `~/.cline` never created |
+| Continue CLI | `ls` | created `<kp>/profiles/w1/continue/{sessions,logs}` | `~/.continue` unchanged (same mtime) |
+
+What this proves: each tool honors the variable keepapart sets and keeps its state in that profile's folder, and two profiles of the same tool get different folders. What it doesn't: no second account was logged in for these tools in this run, so the login-isolation evidence for them comes from their docs and source (linked in the README), not from a live login.
+
+Not run live yet: Goose, Grok Build and Aider (not on npm; running their downloaded official binaries needs a separate OK).
+
 ## Found during the test, fixed
 
 - The Claude Code native installer puts `claude.exe` in `~\.local\bin` and doesn't add that folder to PATH. keepapart now spots this and says exactly which folder to add, instead of just "not on PATH".
@@ -200,3 +218,5 @@ Profile: client-acme (from ~\code\acme-app\.keepapart)
 - Windows Defender blocked the first PowerShell hook (it used `Invoke-Expression`). The hook now runs no generated code: it is dot-sourced from a file and applies plain `set`/`unset` lines.
 - Piping keepapart's output into `head` made it panic on the closed pipe. It now exits quietly.
 - Tests could reach the real `claude.exe` through the new PATH fallback. They now run with a throwaway home folder.
+- 2026-11-23: `--tool mytool` (a custom tool from `tools.toml`) was rejected because `--tool` was parsed before `tools.toml` was read. Fixed; covered by a test.
+- 2026-11-23: Kimi Code has a real `kimi login` command and Continue CLI has none (you sign in inside it); the definitions now match what the installed CLIs offer.

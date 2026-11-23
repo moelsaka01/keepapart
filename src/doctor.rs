@@ -2,8 +2,9 @@
 
 use crate::launch::{self, overriding_vars, Found};
 use crate::paths::same_path;
-use crate::profile::{Store, Tool};
-use crate::share::{self, is_link, ItemState, CATALOG, NEVER_SHARED};
+use crate::profile::{LoginState, Store, Tool};
+use crate::share::{self, catalog, is_link, ItemState};
+use crate::tools::{self, Value};
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
@@ -75,8 +76,15 @@ pub fn run(store: &Store) -> Result<Doctor> {
 
     println!("\nOfficial CLIs");
     let profiles = store.list()?;
-    for t in Tool::ALL {
+    let mut others = Vec::new();
+    for &t in tools::all() {
         let used = profiles.iter().any(|p| p.has(t));
+        if !used {
+            if launch::locate(t).is_ok() {
+                others.push(t.as_str());
+            }
+            continue;
+        }
         match launch::locate(t) {
             Ok((path, found)) => {
                 let version = Command::new(&path)
@@ -100,20 +108,23 @@ pub fn run(store: &Store) -> Result<Doctor> {
                     }
                 }
             }
-            Err(e) if used => d.fail(format!("{e:#}")),
-            Err(_) => d.info(format!("{} isn't on PATH (no profile uses it)", t.program())),
+            Err(e) => d.fail(format!("{e:#}")),
         }
+    }
+    if !others.is_empty() {
+        d.info(format!("also installed, no profile uses them yet: {}", others.join(", ")));
     }
 
     println!("\nEnvironment");
-    for t in Tool::ALL {
-        if let Some(v) = std::env::var_os(t.env_var()) {
+    for &t in tools::all() {
+        for e in t.spec().env.iter().filter(|e| matches!(e.value, Value::Dir(_))) {
+            let Some(v) = std::env::var_os(e.var) else { continue };
             if std::env::var_os("KEEPAPART_ACTIVE").is_some() {
-                d.ok(format!("{}={} (set by the keepapart shell hook)", t.env_var(), v.to_string_lossy()));
+                d.ok(format!("{}={} (set by the keepapart shell hook)", e.var, v.to_string_lossy()));
             } else {
                 d.info(format!(
                     "{}={} is set in this shell; plain `{}` uses it, `keepapart run` overrides it",
-                    t.env_var(),
+                    e.var,
                     v.to_string_lossy(),
                     t.program()
                 ));
@@ -166,8 +177,10 @@ pub fn run(store: &Store) -> Result<Doctor> {
                 d.fail(format!("{} is a link; a profile's {} folder must be its own", dir.display(), t.as_str()));
             }
             if let Some(h) = &home {
-                if same_path(&dir, &h.join(t.default_dir_name())) {
-                    d.fail(format!("{} is your default ~/{}: not isolated", dir.display(), t.default_dir_name()));
+                for def in t.spec().default_dirs {
+                    if same_path(&dir, &h.join(def)) {
+                        d.fail(format!("{} is your default ~/{def}: not isolated", dir.display()));
+                    }
                 }
             }
             if let Some((other, _, _)) = seen.iter().find(|(_, tt, pp)| *tt == t && same_path(pp, &dir)) {
@@ -175,7 +188,7 @@ pub fn run(store: &Store) -> Result<Doctor> {
             }
             seen.push((p.name().to_string(), t, dir.clone()));
 
-            for (_, name) in NEVER_SHARED.iter().filter(|(nt, _)| *nt == t) {
+            for name in share::never_shared(t) {
                 let path = dir.join(name);
                 if is_link(&path) {
                     d.fail(format!(
@@ -184,15 +197,25 @@ pub fn run(store: &Store) -> Result<Doctor> {
                     ));
                 }
             }
-            if p.login_file_present(t) {
-                d.ok(format!("{}: own folder, login file present", t.as_str()));
-            } else if t == Tool::Claude && cfg!(target_os = "macos") {
-                d.ok(format!("{}: own folder, login kept in the macOS Keychain, keyed to this folder", t.as_str()));
-            } else {
-                d.info(format!("{}: own folder, not logged in: keepapart login {}", t.as_str(), p.name()));
+            match p.login_state(t) {
+                LoginState::Yes => d.ok(format!("{}: own folder, login file present", t.as_str())),
+                LoginState::Unknown if t.spec().macos_keychain && cfg!(target_os = "macos") => {
+                    d.ok(format!("{}: own folder, login kept in the macOS Keychain, keyed to this folder", t.as_str()))
+                }
+                LoginState::Unknown => d.ok(format!(
+                    "{}: own folder ({} doesn't say which file holds its login; check inside the tool)",
+                    t.as_str(),
+                    t.spec().name
+                )),
+                LoginState::No => d.info(format!(
+                    "{}: own folder, not logged in: keepapart login {} --tool {}",
+                    t.as_str(),
+                    p.name(),
+                    t
+                )),
             }
 
-            for item in CATALOG.iter().filter(|i| i.tool == t) {
+            for item in catalog().iter().filter(|i| i.tool == t) {
                 match share::state(store, p, item) {
                     ItemState::Shared(m) => d.ok(format!("{} shared ({})", item.id(), m.as_str())),
                     ItemState::Broken => d.fail(format!(

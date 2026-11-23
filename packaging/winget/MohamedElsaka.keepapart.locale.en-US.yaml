@@ -11,7 +11,7 @@ PackageName: keepapart
 PackageUrl: https://github.com/moelsaka01/keepapart
 License: MIT
 LicenseUrl: https://github.com/moelsaka01/keepapart/blob/main/LICENSE
-ShortDescription: One machine, many Claude & Codex accounts. Work, personal, clients, kept apart.
+ShortDescription: One machine, many AI coding accounts. Work, personal, clients, kept apart.
 Description: |-
   keepapart gives each of your Claude Code and Codex accounts its own isolated profile
   (CLAUDE_CONFIG_DIR / CODEX_HOME), so work, personal and client accounts never mix and

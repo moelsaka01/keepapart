@@ -1,6 +1,6 @@
 //! Shared vs per-profile config.
 //!
-//! Only items in [`CATALOG`] can ever be shared. Logins and session history are
+//! Only items in [`catalog`] can ever be shared. Logins and session history are
 //! not in the catalog, so there is no code path that links or copies them.
 //! A shared item lives once in `shared/<tool>/<item>`, and each profile that
 //! shares it gets a link at `profiles/<id>/<tool>/<item>`:
@@ -18,16 +18,14 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    File,
-    Dir,
-}
+pub use crate::tools::Kind;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Item {
     pub tool: Tool,
     pub name: &'static str,
+    /// Path inside the tool's folder.
+    pub path: &'static str,
     pub kind: Kind,
     /// Shared automatically for new profiles (unless `--isolated`).
     pub default_shared: bool,
@@ -40,56 +38,56 @@ impl Item {
     }
 }
 
-const fn item(tool: Tool, name: &'static str, kind: Kind, default_shared: bool, about: &'static str) -> Item {
-    Item { tool, name, kind, default_shared, about }
+/// Everything keepapart is willing to share: the `share` lists of the known
+/// tools. Nothing else, ever.
+pub fn catalog() -> &'static [Item] {
+    static CATALOG: std::sync::OnceLock<Vec<Item>> = std::sync::OnceLock::new();
+    CATALOG.get_or_init(|| {
+        crate::tools::all()
+            .iter()
+            .flat_map(|t| {
+                t.spec().share.iter().map(move |d| Item {
+                    tool: *t,
+                    name: d.name,
+                    path: d.path,
+                    kind: d.kind,
+                    default_shared: d.default,
+                    about: d.about,
+                })
+            })
+            .collect()
+    })
 }
 
-/// Everything keepapart is willing to share. Nothing else, ever.
-pub const CATALOG: &[Item] = &[
-    item(Tool::Claude, "skills", Kind::Dir, true, "Agent skills"),
-    item(Tool::Claude, "agents", Kind::Dir, true, "Subagent definitions"),
-    item(Tool::Claude, "commands", Kind::Dir, true, "Custom slash commands"),
-    item(Tool::Claude, "output-styles", Kind::Dir, true, "Output styles"),
-    item(Tool::Claude, "CLAUDE.md", Kind::File, true, "Your global instructions"),
-    item(Tool::Claude, "settings.json", Kind::File, false, "Settings: model, permissions, hooks, env, statusline"),
-    item(Tool::Claude, "plugins", Kind::Dir, false, "Plugins and marketplaces (can bundle MCP servers)"),
-    item(Tool::Codex, "skills", Kind::Dir, true, "Agent skills"),
-    item(Tool::Codex, "prompts", Kind::Dir, true, "Custom prompts"),
-    item(Tool::Codex, "AGENTS.md", Kind::File, true, "Your global instructions"),
-    item(Tool::Codex, "config.toml", Kind::File, false, "Settings and MCP servers"),
-    item(Tool::Codex, "rules", Kind::Dir, false, "Command approval rules"),
-];
+/// What a tool keeps per account (logins, history). Never shareable; `doctor`
+/// fails if any of these is a link.
+pub fn never_shared(tool: Tool) -> &'static [&'static str] {
+    tool.spec().never_shared
+}
 
-/// What the official CLIs keep per account. Never in the catalog; `doctor`
-/// warns if any of these is a link.
-pub const NEVER_SHARED: &[(Tool, &str)] = &[
-    (Tool::Claude, ".credentials.json"),
-    (Tool::Claude, ".claude.json"),
-    (Tool::Claude, "projects"),
-    (Tool::Claude, "history.jsonl"),
-    (Tool::Claude, "sessions"),
-    (Tool::Claude, "todos"),
-    (Tool::Claude, "file-history"),
-    (Tool::Claude, "shell-snapshots"),
-    (Tool::Claude, "statsig"),
-    (Tool::Codex, "auth.json"),
-    (Tool::Codex, "sessions"),
-    (Tool::Codex, "archived_sessions"),
-    (Tool::Codex, "history.jsonl"),
-    (Tool::Codex, "log"),
-];
+fn is_never_shared(tool: Tool, path: &str) -> bool {
+    let p = path.trim_matches(['/', '\\']).replace('\\', "/").to_ascii_lowercase();
+    never_shared(tool).iter().any(|n| {
+        let n = n.to_ascii_lowercase();
+        p == n || p.starts_with(&format!("{n}/")) || n.starts_with(&format!("{p}/"))
+    })
+}
 
 pub fn lookup(id: &str) -> Result<&'static Item> {
     let (tool, name) = id
         .split_once(':')
         .with_context(|| format!("item must look like claude:skills or codex:prompts, got {id:?}"))?;
     let tool = Tool::parse(tool).with_context(|| format!("unknown tool {tool:?} in {id:?}"))?;
-    if NEVER_SHARED.iter().any(|(t, n)| *t == tool && n.eq_ignore_ascii_case(name)) {
+    if is_never_shared(tool, name) {
         bail!("{id} holds a login or session history and is always kept per profile");
     }
-    CATALOG.iter().find(|i| i.tool == tool && i.name == name).with_context(|| {
-        let ids: Vec<String> = CATALOG.iter().filter(|i| i.tool == tool).map(|i| i.id()).collect();
-        format!("{id:?} can't be shared. Shareable: {}", ids.join(", "))
+    catalog().iter().find(|i| i.tool == tool && i.name == name).with_context(|| {
+        let ids: Vec<String> = catalog().iter().filter(|i| i.tool == tool).map(|i| i.id()).collect();
+        if ids.is_empty() {
+            format!("{id:?} can't be shared: {} has nothing shareable", tool.spec().name)
+        } else {
+            format!("{id:?} can't be shared. Shareable: {}", ids.join(", "))
+        }
     })
 }
 
@@ -228,11 +226,11 @@ fn create_empty(path: &Path, kind: Kind) -> Result<()> {
 }
 
 pub fn shared_path(store: &Store, item: &Item) -> PathBuf {
-    store.shared_dir(item.tool).join(item.name)
+    store.shared_dir(item.tool).join(item.path)
 }
 
 pub fn profile_path(p: &Profile, item: &Item) -> PathBuf {
-    p.tool_dir(item.tool).join(item.name)
+    p.tool_dir(item.tool).join(item.path)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -255,6 +253,9 @@ pub fn share(store: &Store, p: &mut Profile, item: &Item, force: bool) -> Result
     let target = shared_path(store, item);
     let link = profile_path(p, item);
     let id = item.id();
+    for d in [target.parent(), link.parent()].into_iter().flatten() {
+        fs::create_dir_all(d)?;
+    }
 
     if let Some(e) = p.shared_entry(&id).cloned() {
         match e.mode {
@@ -294,7 +295,8 @@ pub fn share(store: &Store, p: &mut Profile, item: &Item, force: bool) -> Result
                 target.display()
             );
         } else {
-            let b = link.with_file_name(format!("{}.keepapart-backup-{}", item.name, now_secs()));
+            let base = link.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let b = link.with_file_name(format!("{base}.keepapart-backup-{}", now_secs()));
             move_any(&link, &b)?;
             backup = Some(b);
             outcome_kind = 2;
@@ -357,7 +359,7 @@ pub fn unshare(store: &Store, p: &mut Profile, item: &Item) -> Result<()> {
 
 /// Remove every link to the shared store inside a profile (used before deleting it).
 pub fn unlink_all(p: &Profile) -> Result<()> {
-    for item in CATALOG {
+    for item in catalog() {
         let link = profile_path(p, item);
         if is_link(&link) {
             remove_link(&link)?;
@@ -368,7 +370,7 @@ pub fn unlink_all(p: &Profile) -> Result<()> {
 
 /// Share every default item for a fresh profile.
 pub fn apply_defaults(store: &Store, p: &mut Profile) -> Result<Vec<(String, Result<ShareOutcome>)>> {
-    let items: Vec<&Item> = CATALOG.iter().filter(|i| i.default_shared && p.has(i.tool)).collect();
+    let items: Vec<&Item> = catalog().iter().filter(|i| i.default_shared && p.has(i.tool)).collect();
     let mut out = Vec::new();
     for item in items {
         out.push((item.id(), share(store, p, item, false)));
@@ -506,20 +508,21 @@ mod tests {
 
     #[test]
     fn catalog_never_contains_logins_or_history() {
-        for i in CATALOG {
-            assert!(
-                !NEVER_SHARED.iter().any(|(t, n)| *t == i.tool && *n == i.name),
-                "{} must never be shareable",
-                i.id()
-            );
+        for i in catalog() {
+            assert!(!is_never_shared(i.tool, i.path), "{} must never be shareable", i.id());
         }
         assert!(lookup("claude:.credentials.json").is_err());
         assert!(lookup("codex:auth.json").is_err());
         assert!(lookup("codex:AUTH.JSON").is_err());
         assert!(lookup("claude:projects").is_err());
+        assert!(lookup("claude:projects/x").is_err());
+        assert!(lookup("gemini:.gemini/oauth_creds.json").is_err());
+        assert!(lookup("goose:config/secrets.yaml").is_err());
+        assert!(lookup("aider:.env").is_err());
         assert!(lookup("claude:../../etc").is_err());
         assert!(lookup("skills").is_err());
-        assert!(lookup("gemini:skills").is_err());
+        assert!(lookup("nope:skills").is_err());
         assert_eq!(lookup("claude:skills").unwrap().kind, Kind::Dir);
+        assert_eq!(lookup("gemini:GEMINI.md").unwrap().path, ".gemini/GEMINI.md");
     }
 }

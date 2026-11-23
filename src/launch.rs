@@ -1,11 +1,13 @@
 //! Launching the official CLIs with a profile's environment.
 //!
-//! keepapart sets exactly two documented variables, CLAUDE_CONFIG_DIR and
-//! CODEX_HOME, plus KEEPAPART_ACTIVE (informational), and then runs the real
-//! `claude` / `codex`. Each launch is its own process with its own
-//! environment, so any number of profiles can run side by side.
+//! keepapart sets only the documented variables each tool reads to find its
+//! folder (CLAUDE_CONFIG_DIR, CODEX_HOME, GEMINI_CLI_HOME, ...; see
+//! [`crate::tools`]) plus KEEPAPART_ACTIVE, and then runs the real CLI. Each
+//! launch is its own process with its own environment, so any number of
+//! profiles can run side by side.
 
 use crate::profile::{Profile, Tool};
+use crate::tools::{self, Value};
 use anyhow::{Context, Result};
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -13,19 +15,17 @@ use std::process::{Command, Output, Stdio};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Found {
-    /// `$KEEPAPART_CLAUDE_BIN` / `$KEEPAPART_CODEX_BIN`
+    /// `$KEEPAPART_<TOOL>_BIN`
     Override,
-    /// On PATH (with PATHEXT on Windows, so `claude.cmd` from npm works too).
+    /// On PATH (with PATHEXT on Windows, so `.cmd` shims from npm work too).
     Path,
-    /// In the official native installer's folder (`~/.local/bin`), which isn't on PATH.
+    /// In the official native installers' folder (`~/.local/bin`), which isn't on PATH.
     InstallerDir,
 }
 
-pub fn bin_override_var(tool: Tool) -> &'static str {
-    match tool {
-        Tool::Claude => "KEEPAPART_CLAUDE_BIN",
-        Tool::Codex => "KEEPAPART_CODEX_BIN",
-    }
+/// `KEEPAPART_CLAUDE_BIN`, `KEEPAPART_GEMINI_BIN`, ...
+pub fn bin_override_var(tool: Tool) -> String {
+    format!("KEEPAPART_{}_BIN", tool.as_str().to_ascii_uppercase().replace('-', "_"))
 }
 
 /// The user's home folder, honoring `USERPROFILE` (Windows) / `HOME` first.
@@ -34,8 +34,8 @@ pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from).or_else(dirs::home_dir)
 }
 
-/// The official native installers put the CLI in `~/.local/bin`, which often
-/// isn't on PATH yet (the Claude Code installer says so on Windows).
+/// Native installers often put the CLI in `~/.local/bin`, which may not be on
+/// PATH yet (the Claude Code installer says so on Windows).
 pub fn installer_dir_binary(tool: Tool) -> Option<PathBuf> {
     let dir = home_dir()?.join(".local").join("bin");
     let name = if cfg!(windows) { format!("{}.exe", tool.program()) } else { tool.program().to_string() };
@@ -43,8 +43,7 @@ pub fn installer_dir_binary(tool: Tool) -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
-/// Find the official CLI: the override variable, then PATH, then the
-/// official installer's folder.
+/// Find the official CLI: the override variable, then PATH, then `~/.local/bin`.
 pub fn locate(tool: Tool) -> Result<(PathBuf, Found)> {
     if let Some(p) = std::env::var_os(bin_override_var(tool)).filter(|v| !v.is_empty()) {
         return Ok((PathBuf::from(p), Found::Override));
@@ -55,11 +54,13 @@ pub fn locate(tool: Tool) -> Result<(PathBuf, Found)> {
     if let Some(p) = installer_dir_binary(tool) {
         return Ok((p, Found::InstallerDir));
     }
-    let how = match tool {
-        Tool::Claude => "https://code.claude.com/docs/en/setup",
-        Tool::Codex => "https://developers.openai.com/codex/cli",
-    };
-    anyhow::bail!("`{}` isn't installed or isn't on your PATH. Install it first: {how}", tool.program())
+    let how = tool.spec().install;
+    anyhow::bail!(
+        "`{}` ({}) isn't installed or isn't on your PATH.{}",
+        tool.program(),
+        tool.spec().name,
+        if how.is_empty() { String::new() } else { format!(" Install it first: {how}") }
+    )
 }
 
 pub fn program_path(tool: Tool) -> Result<PathBuf> {
@@ -78,22 +79,34 @@ pub fn path_advice(tool: Tool, path: &std::path::Path) -> String {
     )
 }
 
-/// The environment a profile adds. Both tool variables are set when the
-/// profile has both tools, so a `claude` session that shells out to `codex`
-/// stays on the same profile.
+/// The variables one tool gets for this profile.
+pub fn tool_env(p: &Profile, tool: Tool) -> Vec<(&'static str, OsString)> {
+    let dir = p.tool_dir(tool);
+    tool.spec()
+        .env
+        .iter()
+        .map(|e| {
+            let v: OsString = match e.value {
+                Value::Dir("") => dir.clone().into_os_string(),
+                Value::Dir(sub) => dir.join(sub).into_os_string(),
+                Value::Lit(s) => s.into(),
+            };
+            (e.var, v)
+        })
+        .collect()
+}
+
+/// The environment a profile adds: every tool it uses (so a `claude` session
+/// that shells out to `gemini` stays on the same profile), plus KEEPAPART_ACTIVE.
 pub fn profile_env(p: &Profile) -> Vec<(&'static str, OsString)> {
-    let mut env: Vec<(&'static str, OsString)> =
-        p.file.tools.iter().map(|t| (t.env_var(), p.tool_dir(*t).into_os_string())).collect();
+    let mut env: Vec<(&'static str, OsString)> = p.file.tools.iter().flat_map(|t| tool_env(p, *t)).collect();
     env.push(("KEEPAPART_ACTIVE", p.name().into()));
     env
 }
 
 /// Variables that make the official CLI ignore the profile's login.
 pub fn overriding_vars(tool: Tool) -> &'static [&'static str] {
-    match tool {
-        Tool::Claude => &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"],
-        Tool::Codex => &[],
-    }
+    tool.spec().overriding
 }
 
 pub fn warn_overrides(tool: Tool, clean_env: bool) {
@@ -117,19 +130,18 @@ pub fn command(p: &Profile, tool: Tool, args: &[OsString], clean_env: bool) -> R
     let prog = program_path(tool)?;
     let mut cmd = Command::new(prog);
     cmd.args(args);
+    // Don't let a value the shell hook set for another profile's tool leak in.
+    if std::env::var_os("KEEPAPART_ACTIVE").is_some() {
+        for v in tools::hook_vars() {
+            cmd.env_remove(v);
+        }
+    }
     for (k, v) in profile_env(p) {
         cmd.env(k, v);
     }
-    // A profile that doesn't use the other tool shouldn't inherit a stale value
-    // from a shell hook either.
-    for t in Tool::ALL {
-        if !p.has(t) && std::env::var_os("KEEPAPART_ACTIVE").is_some() {
-            cmd.env_remove(t.env_var());
-        }
-    }
     if clean_env {
-        for t in Tool::ALL {
-            for v in overriding_vars(t) {
+        for t in tools::all() {
+            for v in overriding_vars(*t) {
                 cmd.env_remove(v);
             }
         }
@@ -174,18 +186,12 @@ pub fn capture(p: &Profile, tool: Tool, args: &[OsString]) -> Result<Output> {
     command(p, tool, args, false)?.stdin(Stdio::null()).output().with_context(|| format!("starting {}", tool.program()))
 }
 
-/// The official login commands: `claude auth login` and `codex login`.
-pub fn login_args(tool: Tool) -> Vec<OsString> {
-    match tool {
-        Tool::Claude => vec!["auth".into(), "login".into()],
-        Tool::Codex => vec!["login".into()],
-    }
+/// The official login command's arguments; `None` if the tool has no login command.
+pub fn login_args(tool: Tool) -> Option<Vec<OsString>> {
+    tool.spec().login.map(|a| a.iter().map(OsString::from).collect())
 }
 
-/// The official logout commands: `claude auth logout` and `codex logout`.
-pub fn logout_args(tool: Tool) -> Vec<OsString> {
-    match tool {
-        Tool::Claude => vec!["auth".into(), "logout".into()],
-        Tool::Codex => vec!["logout".into()],
-    }
+/// The official logout command's arguments, if the tool has one.
+pub fn logout_args(tool: Tool) -> Option<Vec<OsString>> {
+    tool.spec().logout.map(|a| a.iter().map(OsString::from).collect())
 }

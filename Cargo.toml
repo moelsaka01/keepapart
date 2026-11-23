@@ -1,14 +1,14 @@
 [package]
 name = "keepapart"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.88"
-description = "One machine, many Claude & Codex accounts. Work, personal, clients, kept apart."
+description = "One machine, many AI coding accounts. Work, personal, clients, kept apart."
 license = "MIT"
 repository = "https://github.com/moelsaka01/keepapart"
 readme = "README.md"
 include = ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "Cargo.lock", "/README.md", "/CHANGELOG.md", "/LICENSE"]
-keywords = ["claude", "codex", "accounts", "profiles", "cli"]
+keywords = ["claude", "codex", "gemini", "ai", "profiles"]
 categories = ["command-line-utilities", "development-tools"]
 authors = ["Mohamed Elsaka"]
 

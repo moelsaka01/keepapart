@@ -1,10 +1,11 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use keepapart::paths::{ago, now_secs};
-use keepapart::profile::{Profile, Store, Tool, ToolChoice};
+use keepapart::profile::{LoginState, Profile, Store, Tool};
 use keepapart::resolve::{self, Resolved, Source};
-use keepapart::share::{self, ItemState, ShareOutcome, CATALOG};
+use keepapart::share::{self, catalog, ItemState, ShareOutcome};
 use keepapart::shell::{self, Desired, Shell};
+use keepapart::tools::{self, parse_tool};
 use keepapart::{doctor, export, launch, mcp};
 use std::ffi::OsString;
 use std::io::IsTerminal;
@@ -14,12 +15,15 @@ use std::path::PathBuf;
 #[command(
     name = "keepapart",
     version,
-    about = "One machine, many Claude & Codex accounts. Work, personal, clients, kept apart.",
-    long_about = "One machine, many Claude & Codex accounts. Work, personal, clients, kept apart.\n\n\
-        Each profile is its own CLAUDE_CONFIG_DIR / CODEX_HOME. You log in with the official CLI; \
-        keepapart never reads, copies or moves your credentials and makes no network calls.\n\n\
+    about = "One machine, many AI coding accounts. Work, personal, clients, kept apart.",
+    long_about = "One machine, many AI coding accounts. Work, personal, clients, kept apart.\n\n\
+        Claude Code, Codex, Gemini CLI, Grok Build, Kimi Code, Qwen Code, Goose, Crush, Cline, Continue, \
+        Aider and OpenCode, plus any tool you add in tools.toml. Each profile gives each tool its own \
+        folder through the tool's documented setting (CLAUDE_CONFIG_DIR, CODEX_HOME, GEMINI_CLI_HOME, ...). \
+        You log in with the official CLI; keepapart never reads, copies or moves your credentials and \
+        makes no network calls.\n\n\
         Run with no arguments to pick a profile and launch it.",
-    after_help = "Examples:\n  keepapart add work --tool both\n  keepapart run work\n  keepapart run personal -- --resume\n  keepapart use client-acme        # this folder always uses client-acme\n  keepapart doctor"
+    after_help = "Examples:\n  keepapart add work --tool claude,gemini\n  keepapart run work\n  keepapart run work --tool gemini\n  keepapart run personal -- --resume\n  keepapart use client-acme        # this folder always uses client-acme\n  keepapart tools                  # every supported AI CLI\n  keepapart doctor"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -31,9 +35,9 @@ enum Cmd {
     /// Create a profile (or add a tool to one) and log in with the official CLI
     Add {
         name: String,
-        /// Which CLI this profile is for
-        #[arg(long, short, value_enum, default_value = "claude")]
-        tool: ToolChoice,
+        /// Which CLIs this profile is for, comma-separated (see `keepapart tools`); `both` = claude,codex
+        #[arg(long, short, default_value = "claude")]
+        tool: String,
         /// Share nothing with other profiles (default: skills, agents, commands, instructions are shared)
         #[arg(long)]
         isolated: bool,
@@ -44,25 +48,25 @@ enum Cmd {
     /// Log a profile in (or again) with the official CLI
     Login {
         name: String,
-        #[arg(long, short, value_enum)]
+        #[arg(long, short, value_parser = parse_tool)]
         tool: Option<Tool>,
         /// Extra arguments for the login command, after -- (e.g. -- --sso)
         #[arg(last = true)]
         args: Vec<OsString>,
     },
-    /// Launch claude or codex with a profile. Several can run at once.
+    /// Launch an AI CLI with a profile. Several can run at once.
     #[command(alias = "r")]
     Run {
         /// Profile (default: the one for this folder, see `keepapart status`)
         name: Option<String>,
-        /// Which CLI, for profiles that have both (default: claude)
-        #[arg(long, short, value_enum)]
+        /// Which CLI, for profiles with several (default: the first one)
+        #[arg(long, short, value_parser = parse_tool)]
         tool: Option<Tool>,
-        /// Hide ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / CLAUDE_CODE_OAUTH_TOKEN from this launch,
-        /// so the profile's own login is used
+        /// Hide API-key variables that would override the profile's login (ANTHROPIC_API_KEY,
+        /// GEMINI_API_KEY, ...) from this launch
         #[arg(long)]
         clean_env: bool,
-        /// Arguments passed to claude/codex, after --
+        /// Arguments passed to the CLI, after --
         #[arg(last = true)]
         args: Vec<OsString>,
     },
@@ -128,6 +132,8 @@ enum Cmd {
         #[command(subcommand)]
         cmd: McpCmd,
     },
+    /// List the AI CLIs keepapart supports and how each is kept apart
+    Tools,
     /// Check installs, PATH, isolation and link permissions
     Doctor,
     /// Print a shell hook that applies the folder's profile to plain claude/codex
@@ -183,12 +189,14 @@ fn main() {
 }
 
 fn real_main() -> Result<i32> {
+    // Custom tools from tools.toml must be known before `--tool` is parsed.
+    tools::init(Some(&keepapart::paths::keepapart_home()?))?;
     let cli = Cli::parse();
     let store = Store::open()?;
     let cwd = std::env::current_dir().context("reading the current folder")?;
     match cli.cmd {
         None => pick(&store, &cwd),
-        Some(Cmd::Add { name, tool, isolated, no_login }) => add(&store, &name, tool, isolated, no_login),
+        Some(Cmd::Add { name, tool, isolated, no_login }) => add(&store, &name, &tool, isolated, no_login),
         Some(Cmd::Login { name, tool, args }) => {
             let p = store.find(&name)?;
             let tools = match tool {
@@ -281,6 +289,7 @@ fn real_main() -> Result<i32> {
             Ok(0)
         }
         Some(Cmd::Mcp { cmd }) => mcp_cmd(&store, cmd),
+        Some(Cmd::Tools) => tools_cmd(),
         Some(Cmd::Doctor) => {
             let d = doctor::run(&store)?;
             Ok(if d.errors > 0 { 1 } else { 0 })
@@ -315,7 +324,14 @@ fn real_main() -> Result<i32> {
                 Ok(Some(r)) => match store.try_find(&r.name)? {
                     Some(p) => Some(Desired {
                         profile: p.name().to_string(),
-                        dirs: p.file.tools.iter().map(|t| (*t, p.tool_dir(*t).display().to_string())).collect(),
+                        vars: p
+                            .file
+                            .tools
+                            .iter()
+                            .filter(|t| t.spec().hook)
+                            .flat_map(|t| launch::tool_env(&p, *t))
+                            .map(|(k, v)| (k.to_string(), v.to_string_lossy().into_owned()))
+                            .collect(),
                     }),
                     None => {
                         eprintln!("keepapart: no profile named {:?} ({})", r.name, r.source.describe());
@@ -329,7 +345,7 @@ fn real_main() -> Result<i32> {
                 }
             };
             let cur = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-            print!("{}", shell::env_script(shell, desired.as_ref(), &cur));
+            print!("{}", shell::env_script(shell, desired.as_ref(), &tools::hook_vars(), &cur));
             Ok(0)
         }
     }
@@ -356,13 +372,23 @@ fn pick_tool(p: &Profile, tool: Option<Tool>) -> Result<Tool> {
 }
 
 fn login(p: &Profile, t: Tool, extra: &[OsString]) -> Result<()> {
-    let mut args = launch::login_args(t);
+    let Some(mut args) = launch::login_args(t) else {
+        let dir = p.tool_dir(t);
+        println!();
+        println!("{}", t.spec().login_hint.replace("{dir}", &dir.display().to_string()));
+        return Ok(());
+    };
     args.extend(extra.iter().cloned());
     println!();
+    if !t.spec().login_hint.is_empty() {
+        println!("{}", t.spec().login_hint);
+    }
     println!(
-        "Running `{} {}` as profile {:?}. Sign in with the account for this profile.",
-        t.program(),
-        args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "),
+        "Running `{}` as profile {:?}. Sign in with the account for this profile.",
+        std::iter::once(t.program().to_string())
+            .chain(args.iter().map(|a| a.to_string_lossy().into_owned()))
+            .collect::<Vec<_>>()
+            .join(" "),
         p.name()
     );
     println!("Login is handled entirely by the official CLI. keepapart never sees it.\n");
@@ -373,11 +399,11 @@ fn login(p: &Profile, t: Tool, extra: &[OsString]) -> Result<()> {
     Ok(())
 }
 
-fn add(store: &Store, name: &str, choice: ToolChoice, isolated: bool, no_login: bool) -> Result<i32> {
-    let tools = choice.tools();
+fn add(store: &Store, name: &str, choice: &str, isolated: bool, no_login: bool) -> Result<i32> {
+    let tools = tools::parse_tool_list(choice)?;
     let (mut p, new_tools) = match store.try_find(name)? {
         Some(mut p) => {
-            let mut added = vec![];
+            let mut added: Vec<Tool> = vec![];
             for t in &tools {
                 if store.add_tool(&mut p, *t)? {
                     added.push(*t);
@@ -414,8 +440,8 @@ fn add(store: &Store, name: &str, choice: ToolChoice, isolated: bool, no_login: 
             }
         }
     }
-    if !isolated && p.has(Tool::Claude) && !mcp::load(store)?.is_empty() {
-        if launch::program_path(Tool::Claude).is_ok() {
+    if !isolated && p.has(Tool::CLAUDE) && !mcp::load(store)?.is_empty() {
+        if launch::program_path(Tool::CLAUDE).is_ok() {
             match mcp::sync_profile(store, &mut p) {
                 Ok(log) => println!("Shared MCP servers: {}", log.join(", ")),
                 Err(e) => eprintln!("keepapart: couldn't install shared MCP servers: {e:#}"),
@@ -480,28 +506,14 @@ fn use_cmd(
         let path = resolve::write_marker(&dir, p.name())?;
         println!("Wrote {}. `keepapart run` in this folder (and below) uses {name:?}.", path.display());
         if std::env::var_os("KEEPAPART_ACTIVE").is_none() {
-            println!("Want plain `claude` / `codex` to follow it too? See `keepapart hook --help`.");
+            println!("Want the plain CLIs (claude, codex, gemini, ...) to follow it too? See `keepapart hook --help`.");
         }
     }
     Ok(0)
 }
 
 fn login_label(p: &Profile) -> String {
-    p.file
-        .tools
-        .iter()
-        .map(|t| {
-            let s = if p.login_file_present(*t) {
-                "yes"
-            } else if *t == Tool::Claude && cfg!(target_os = "macos") {
-                "?"
-            } else {
-                "no"
-            };
-            format!("{}:{s}", t.as_str())
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    p.file.tools.iter().map(|t| format!("{}:{}", t.as_str(), p.login_state(*t).label())).collect::<Vec<_>>().join(" ")
 }
 
 fn list(store: &Store, cwd: &std::path::Path) -> Result<i32> {
@@ -532,7 +544,7 @@ fn list(store: &Store, cwd: &std::path::Path) -> Result<i32> {
     if here.is_some() {
         println!("\n* active in this folder");
     }
-    if cfg!(target_os = "macos") && profiles.iter().any(|p| p.has(Tool::Claude)) {
+    if cfg!(target_os = "macos") && profiles.iter().any(|p| p.has(Tool::CLAUDE)) {
         println!("claude:? = Claude Code keeps macOS logins in the Keychain, which keepapart never reads.");
         println!("          Check one with: keepapart run <name> -- auth status --text");
     }
@@ -558,20 +570,22 @@ fn status(store: &Store, cwd: &std::path::Path) -> Result<i32> {
             };
             println!("Profile: {} ({})", p.name(), r.source.describe());
             for t in &p.file.tools {
-                println!("  {:6}  {}={}", t.as_str(), t.env_var(), p.tool_dir(*t).display());
+                let vars: Vec<String> =
+                    launch::tool_env(&p, *t).into_iter().map(|(k, v)| format!("{k}={}", v.to_string_lossy())).collect();
+                println!("  {:8} {}", t.as_str(), vars.join("  "));
             }
             println!("  login   {}", login_label(&p));
             println!("  used    {}", ago(p.last_used(), now_secs()));
             let shared: Vec<&str> = p.file.shared.iter().map(|e| e.item.as_str()).collect();
             println!("  shared  {}", if shared.is_empty() { "nothing".into() } else { shared.join(", ") });
             match std::env::var("KEEPAPART_ACTIVE") {
-                Ok(a) if a == p.name() => println!("  shell   hook active: plain claude/codex use this profile"),
+                Ok(a) if a == p.name() => println!("  shell   hook active: the plain CLIs use this profile"),
                 Ok(a) => println!("  shell   hook says {a:?}; it updates at your next prompt"),
                 Err(_) => println!("  shell   no hook: use `keepapart run`, or see `keepapart hook --help`"),
             }
         }
     }
-    println!("\nPlan usage and limits: run /usage inside Claude Code, or /status inside Codex.");
+    println!("\nPlan usage and limits: ask the tool itself (e.g. /usage in Claude Code, /status in Codex).");
     println!("keepapart doesn't fetch them: that would mean reading your login or calling unofficial endpoints.");
     Ok(0)
 }
@@ -582,7 +596,7 @@ fn shared(store: &Store, profile: Option<&str>) -> Result<i32> {
         None => store.list()?,
     };
     println!("Shareable items (logins and session history never are):");
-    for item in CATALOG {
+    for item in catalog() {
         let users: Vec<String> = profiles
             .iter()
             .filter(|p| p.has(item.tool))
@@ -632,11 +646,14 @@ fn remove(store: &Store, name: &str, yes: bool, keep_login: bool) -> Result<i32>
     }
     if !keep_login {
         for &t in &p.file.tools {
-            let signed_in = p.login_file_present(t) || (t == Tool::Claude && cfg!(target_os = "macos"));
-            if !signed_in {
+            if p.login_state(t) == LoginState::No {
                 continue;
             }
-            match launch::capture(&p, t, &launch::logout_args(t)) {
+            let Some(args) = launch::logout_args(t) else {
+                println!("{} has no logout command; its login files are deleted with the profile.", t.spec().name);
+                continue;
+            };
+            match launch::capture(&p, t, &args) {
                 Ok(o) if o.status.success() => println!("Signed out of {} for {name:?}.", t.as_str()),
                 Ok(o) => {
                     eprintln!("keepapart: {} logout said: {}", t.as_str(), String::from_utf8_lossy(&o.stderr).trim())
@@ -719,12 +736,12 @@ fn mcp_sync(store: &Store, only: Option<&str>) -> Result<i32> {
         Some(n) => vec![store.find(n)?],
         None => store.list()?,
     };
-    profiles.retain(|p| p.has(Tool::Claude));
+    profiles.retain(|p| p.has(Tool::CLAUDE));
     if profiles.is_empty() {
         println!("No Claude profiles to update.");
         return Ok(0);
     }
-    if launch::program_path(Tool::Claude).is_err() {
+    if launch::program_path(Tool::CLAUDE).is_err() {
         bail!(
             "`claude` isn't installed, so profiles can't be updated yet. Run `keepapart mcp sync` after installing it"
         );
@@ -766,4 +783,27 @@ fn mcp_cmd(store: &Store, cmd: McpCmd) -> Result<i32> {
         }
         McpCmd::Sync { profile } => mcp_sync(store, profile.as_deref()),
     }
+}
+
+fn tools_cmd() -> Result<i32> {
+    println!("Supported AI CLIs (each profile gives each tool its own folder):\n");
+    let w = tools::all().iter().map(|t| t.as_str().len()).max().unwrap_or(6);
+    for &t in tools::all() {
+        let spec = t.spec();
+        let installed = if launch::locate(t).is_ok() { "installed" } else { "-" };
+        let vars: Vec<&str> = spec.env.iter().map(|e| e.var).collect();
+        println!("  {:w$}  {:24} {:10} {}", t.as_str(), spec.name, installed, vars.join(" + "));
+        println!(
+            "  {:w$}  {}{}",
+            "",
+            spec.kind,
+            if spec.hook { "" } else { "  (keepapart run only, not the shell hook)" }
+        );
+    }
+    println!("\nChecked and not supported, because their login can't be kept apart safely:");
+    for (name, why) in tools::UNSUPPORTED {
+        println!("  {name}: {why}");
+    }
+    println!("\nAdd your own in tools.toml next to your profiles; see the README section \"Any other AI CLI\".");
+    Ok(0)
 }

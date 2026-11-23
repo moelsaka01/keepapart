@@ -20,85 +20,11 @@
 
 use crate::paths::{self, validate_name, write_atomic};
 use anyhow::{bail, Context, Result};
-use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ValueEnum, PartialOrd, Ord)]
-#[serde(rename_all = "lowercase")]
-pub enum Tool {
-    Claude,
-    Codex,
-}
-
-impl Tool {
-    pub const ALL: [Tool; 2] = [Tool::Claude, Tool::Codex];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Tool::Claude => "claude",
-            Tool::Codex => "codex",
-        }
-    }
-
-    /// The official, documented variable that moves the tool's whole state,
-    /// login included, to another directory.
-    pub fn env_var(self) -> &'static str {
-        match self {
-            Tool::Claude => "CLAUDE_CONFIG_DIR",
-            Tool::Codex => "CODEX_HOME",
-        }
-    }
-
-    /// Executable name looked up on PATH.
-    pub fn program(self) -> &'static str {
-        self.as_str()
-    }
-
-    /// The tool's normal (non-keepapart) state directory name under $HOME.
-    pub fn default_dir_name(self) -> &'static str {
-        match self {
-            Tool::Claude => ".claude",
-            Tool::Codex => ".codex",
-        }
-    }
-
-    /// File the official CLI writes its login to inside its directory. keepapart
-    /// only ever checks whether it exists; it never opens it.
-    pub fn login_file(self) -> &'static str {
-        match self {
-            Tool::Claude => ".credentials.json",
-            Tool::Codex => "auth.json",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Tool> {
-        match s {
-            "claude" => Some(Tool::Claude),
-            "codex" => Some(Tool::Codex),
-            _ => None,
-        }
-    }
-}
-
-/// `--tool claude|codex|both`
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub enum ToolChoice {
-    Claude,
-    Codex,
-    Both,
-}
-
-impl ToolChoice {
-    pub fn tools(self) -> Vec<Tool> {
-        match self {
-            ToolChoice::Claude => vec![Tool::Claude],
-            ToolChoice::Codex => vec![Tool::Codex],
-            ToolChoice::Both => vec![Tool::Claude, Tool::Codex],
-        }
-    }
-}
+pub use crate::tools::Tool;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -181,11 +107,40 @@ impl Profile {
         write_atomic(&self.dir.join("profile.toml"), text.as_bytes())
     }
 
-    /// Does the official CLI's login file exist? Existence only: the file is
-    /// never opened. On macOS Claude Code keeps its login in the Keychain, so
-    /// "no file" there doesn't mean "not logged in".
+    /// Does one of the official CLI's login files exist? Existence only: the
+    /// file is never opened.
     pub fn login_file_present(&self, tool: Tool) -> bool {
-        self.tool_dir(tool).join(tool.login_file()).exists()
+        tool.spec().login_files.iter().any(|f| self.tool_dir(tool).join(f).exists())
+    }
+
+    /// What keepapart can honestly say about a login without reading it.
+    pub fn login_state(&self, tool: Tool) -> LoginState {
+        if self.login_file_present(tool) {
+            LoginState::Yes
+        } else if tool.spec().login_files.is_empty() || (tool.spec().macos_keychain && cfg!(target_os = "macos")) {
+            LoginState::Unknown
+        } else {
+            LoginState::No
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoginState {
+    Yes,
+    No,
+    /// The tool keeps it somewhere keepapart doesn't look (macOS Keychain) or
+    /// doesn't say which file it uses.
+    Unknown,
+}
+
+impl LoginState {
+    pub fn label(self) -> &'static str {
+        match self {
+            LoginState::Yes => "yes",
+            LoginState::No => "no",
+            LoginState::Unknown => "?",
+        }
     }
 }
 
@@ -207,9 +162,8 @@ impl Store {
 
     pub fn at(home: PathBuf) -> Result<Store> {
         fs::create_dir_all(home.join("profiles")).with_context(|| format!("creating {}", home.display()))?;
-        for t in Tool::ALL {
-            fs::create_dir_all(home.join("shared").join(t.as_str()))?;
-        }
+        crate::tools::init(Some(&home))?;
+        fs::create_dir_all(home.join("shared"))?;
         Ok(Store { home })
     }
 
@@ -218,7 +172,9 @@ impl Store {
     }
 
     pub fn shared_dir(&self, tool: Tool) -> PathBuf {
-        self.home.join("shared").join(tool.as_str())
+        let d = self.home.join("shared").join(tool.as_str());
+        let _ = fs::create_dir_all(&d);
+        d
     }
 
     pub fn config_path(&self) -> PathBuf {
@@ -374,40 +330,40 @@ mod tests {
     #[test]
     fn each_profile_gets_its_own_tool_dirs() {
         let (_t, s) = store();
-        let a = s.create("work", &[Tool::Claude, Tool::Codex]).unwrap();
-        let b = s.create("personal", &[Tool::Claude, Tool::Codex]).unwrap();
-        for t in Tool::ALL {
+        let a = s.create("work", &[Tool::CLAUDE, Tool::CODEX]).unwrap();
+        let b = s.create("personal", &[Tool::CLAUDE, Tool::CODEX]).unwrap();
+        for t in [Tool::CLAUDE, Tool::CODEX] {
             assert!(a.tool_dir(t).is_dir());
             assert!(b.tool_dir(t).is_dir());
             assert_ne!(a.tool_dir(t), b.tool_dir(t));
             assert!(!a.tool_dir(t).starts_with(b.dir.as_path()));
         }
-        assert_ne!(a.tool_dir(Tool::Claude), a.tool_dir(Tool::Codex));
+        assert_ne!(a.tool_dir(Tool::CLAUDE), a.tool_dir(Tool::CODEX));
     }
 
     #[test]
     fn duplicate_and_invalid_names_rejected() {
         let (_t, s) = store();
-        s.create("work", &[Tool::Claude]).unwrap();
-        assert!(s.create("work", &[Tool::Codex]).is_err());
-        assert!(s.create("Work", &[Tool::Codex]).is_err());
-        assert!(s.create("../evil", &[Tool::Codex]).is_err());
+        s.create("work", &[Tool::CLAUDE]).unwrap();
+        assert!(s.create("work", &[Tool::CODEX]).is_err());
+        assert!(s.create("Work", &[Tool::CODEX]).is_err());
+        assert!(s.create("../evil", &[Tool::CODEX]).is_err());
         assert!(s.create("ok", &[]).is_err());
     }
 
     #[test]
     fn rename_keeps_the_directory() {
         let (_t, s) = store();
-        let before = s.create("acme", &[Tool::Claude]).unwrap();
+        let before = s.create("acme", &[Tool::CLAUDE]).unwrap();
         s.save_config(&GlobalConfig { default: Some("acme".into()) }).unwrap();
         let after = s.rename("acme", "acme-corp").unwrap();
         assert_eq!(before.dir, after.dir);
-        assert_eq!(before.tool_dir(Tool::Claude), after.tool_dir(Tool::Claude));
+        assert_eq!(before.tool_dir(Tool::CLAUDE), after.tool_dir(Tool::CLAUDE));
         assert!(s.try_find("acme").unwrap().is_none());
         assert_eq!(s.find("acme-corp").unwrap().id, "acme");
         assert_eq!(s.config().unwrap().default.as_deref(), Some("acme-corp"));
         // the old name is free again, and gets a fresh folder
-        let reused = s.create("acme", &[Tool::Codex]).unwrap();
+        let reused = s.create("acme", &[Tool::CODEX]).unwrap();
         assert_eq!(reused.id, "acme-2");
         assert_ne!(reused.dir, after.dir);
     }
@@ -415,20 +371,20 @@ mod tests {
     #[test]
     fn remove_deletes_only_that_profile() {
         let (_t, s) = store();
-        let a = s.create("a", &[Tool::Claude]).unwrap();
-        let b = s.create("b", &[Tool::Claude]).unwrap();
-        fs::write(b.tool_dir(Tool::Claude).join("x"), "keep").unwrap();
+        let a = s.create("a", &[Tool::CLAUDE]).unwrap();
+        let b = s.create("b", &[Tool::CLAUDE]).unwrap();
+        fs::write(b.tool_dir(Tool::CLAUDE).join("x"), "keep").unwrap();
         s.save_config(&GlobalConfig { default: Some("a".into()) }).unwrap();
         s.remove("a").unwrap();
         assert!(!a.dir.exists());
-        assert!(b.tool_dir(Tool::Claude).join("x").exists());
+        assert!(b.tool_dir(Tool::CLAUDE).join("x").exists());
         assert_eq!(s.config().unwrap().default, None);
     }
 
     #[test]
     fn touch_and_last_used() {
         let (_t, s) = store();
-        let a = s.create("a", &[Tool::Codex]).unwrap();
+        let a = s.create("a", &[Tool::CODEX]).unwrap();
         assert_eq!(a.last_used(), None);
         a.touch();
         assert!(a.last_used().is_some());

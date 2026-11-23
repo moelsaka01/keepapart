@@ -2,9 +2,9 @@
 
 # keepapart
 
-**One machine, many Claude & Codex accounts. Work, personal, clients, kept apart.**
+**One machine, many AI coding accounts. Work, personal, clients, kept apart.**
 
-A single-binary CLI that gives each account its own Claude Code / Codex profile. The official CLIs handle the logins themselves. keepapart never touches your tokens.
+A single-binary CLI that gives each account its own profile for **Claude Code, Codex, Gemini CLI, Grok Build, Kimi Code, Qwen Code, Goose, Crush, Cline, Continue, Aider and OpenCode**, plus any CLI you add yourself. The official CLIs handle the logins themselves. keepapart never touches your tokens.
 
 [![CI](https://github.com/moelsaka01/keepapart/actions/workflows/ci.yml/badge.svg)](https://github.com/moelsaka01/keepapart/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/keepapart)](https://crates.io/crates/keepapart)
@@ -23,7 +23,7 @@ A single-binary CLI that gives each account its own Claude Code / Codex profile.
 
 ## The problem
 
-Claude Code and Codex keep **one login per machine**. Supporting several accounts is one of the most-upvoted requests on [anthropics/claude-code#18435](https://github.com/anthropics/claude-code/issues/18435) (1,000+ 👍) and [openai/codex#4432](https://github.com/openai/codex/issues/4432). Until it ships:
+AI coding CLIs keep **one login per machine**. For Claude Code, supporting several accounts is one of the most-upvoted requests on [anthropics/claude-code#18435](https://github.com/anthropics/claude-code/issues/18435) (1,000+ 👍) and [openai/codex#4432](https://github.com/openai/codex/issues/4432). Until it ships:
 
 - you **log out and in** every time you move from your employer's repo to a side project
 - a client's code gets sent through **the wrong account** because you forgot which one is active
@@ -35,17 +35,80 @@ Claude Code and Codex keep **one login per machine**. Supporting several account
 
 | | |
 |---|---|
-| 🧱 **Isolated profiles** | Each profile is its own `CLAUDE_CONFIG_DIR` / `CODEX_HOME`: its own login, history and settings |
-| 🔐 **Hands off your tokens** | You log in with `claude` / `codex login`. keepapart never reads, copies, exports or moves a credential, and never touches the keychain |
+| 🤖 **12 AI CLIs, subscription and open source** | Claude Code, Codex, Gemini CLI, Grok Build, Kimi Code, Qwen Code, Goose, Crush, Cline, Continue, Aider, OpenCode. [The list](#supported-ai-clis) says exactly how each one is kept apart |
+| 🧩 **Any other CLI** | Add your own in `tools.toml`: if a tool can move its login with a variable, keepapart can keep it apart |
+| 🧱 **Isolated profiles** | Each profile gives each tool its own folder (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GEMINI_CLI_HOME`, ...): its own login, history and settings |
+| 🔐 **Hands off your tokens** | You log in with the tool's own login (`claude auth login`, `codex login`, `grok login`, ...). keepapart never reads, copies, exports or moves a credential, and never touches the keychain |
 | 🪟 **Windows first-class** | Native `.exe`, PowerShell and cmd, Windows paths, and a junction or copy fallback when symlinks aren't allowed |
 | 🖥️ **Side by side** | `keepapart run work` in one terminal, `keepapart run personal` in another. Each is its own process with its own environment |
 | 📁 **Per-folder profiles** | `keepapart use client-acme` writes a `.keepapart` file, so that repo always uses the client account. You can commit it |
 | 🔗 **Shared or per-profile config** | Skills, agents, commands and global instructions are shared by default; settings, plugins and Codex `config.toml` are your choice. Logins and history are never shared |
 | 🔌 **Shared MCP servers** | `keepapart mcp add` installs a server in every Claude profile through the official `claude mcp add-json` |
-| 🐚 **Optional shell hook** | bash, zsh, fish and PowerShell: plain `claude` follows the folder you're in. The PowerShell hook runs no `Invoke-Expression` |
+| 🐚 **Optional shell hook** | bash, zsh, fish and PowerShell: plain `claude`, `gemini`, `grok`... follow the folder you're in. The PowerShell hook runs no `Invoke-Expression` |
 | 🩺 **`doctor`** | Checks installs, PATH, isolation, broken links and Windows symlink rights |
 | 📦 **Settings export** | `export-config` writes settings only, with secret-looking values redacted |
 | 🚫 **No network, no telemetry** | keepapart makes no network calls of its own. Not even an update check |
+
+## Supported AI CLIs
+
+keepapart only supports a tool that has an **official, documented way to move its whole state, login included, into another folder**. Then each profile gets its own folder and the tool's own login writes there. A tool without one could only be "switched" by copying its tokens around, which keepapart refuses to do.
+
+| Tool | `--tool` | Kind | What keepapart sets (per profile) | Checked in |
+|---|---|---|---|---|
+| Claude Code | `claude` | subscription or API | `CLAUDE_CONFIG_DIR` | [docs](https://code.claude.com/docs/en/authentication), live |
+| Codex CLI | `codex` | subscription (ChatGPT) or API | `CODEX_HOME` | [docs](https://developers.openai.com/codex/auth), [source](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/storage.rs), live |
+| Gemini CLI | `gemini` | Google account or API, open source | `GEMINI_CLI_HOME` + `GEMINI_FORCE_FILE_STORAGE=true` ¹ | [docs](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/enterprise.md), [source](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/oauth-credential-storage.ts), live (no login) |
+| Grok Build (xAI) | `grok` | SuperGrok or API, open source | `GROK_HOME` | [docs](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/26-config-reference.md) |
+| Kimi Code CLI | `kimi` | Kimi subscription or API | `KIMI_CODE_HOME` | [docs](https://moonshotai.github.io/kimi-code/en/configuration/env-vars.html), live (no login) |
+| Qwen Code | `qwen` | Qwen account or API, open source | `QWEN_HOME` | [source](https://github.com/QwenLM/qwen-code/blob/main/packages/core/src/config/storage.ts), live (no login) |
+| Goose | `goose` | open source, any model | `GOOSE_PATH_ROOT` + `GOOSE_DISABLE_KEYRING=1` ² | [source](https://github.com/block/goose/blob/main/crates/goose/src/config/paths.rs) |
+| Crush | `crush` | open source, any model | `CRUSH_GLOBAL_CONFIG`, `CRUSH_GLOBAL_DATA` | [docs](https://github.com/charmbracelet/crush#readme), live (no login) |
+| Cline CLI | `cline` | Cline account or API, open source | `CLINE_DIR`, `CLINE_DATA_DIR` | [docs](https://docs.cline.bot/cli/cli-reference), live (no login) |
+| Continue CLI | `continue` (runs `cn`) | Continue account or API, open source | `CONTINUE_GLOBAL_DIR` | [source](https://github.com/continuedev/continue/blob/main/core/util/paths.ts), live (no login) |
+| Aider | `aider` | open source, API keys | `AIDER_ENV_FILE` ³ | [docs](https://aider.chat/docs/config/dotenv.html) |
+| OpenCode | `opencode` | open source, any model (incl. ChatGPT / Copilot logins) | `XDG_DATA_HOME`, `XDG_STATE_HOME` ⁴ | [source](https://github.com/anomalyco/opencode/blob/dev/packages/util/src/global-roots.ts), live (no login) |
+
+"live" = run on Windows 11 through keepapart: Claude Code and Codex with two real logins each; the others with a command that writes or reports their state, without logging in ([log](docs/windows-test.md)).
+
+1. Gemini CLI can optionally keep its login in an OS keychain entry with a fixed name, which every profile would share. `GEMINI_FORCE_FILE_STORAGE` is Gemini's own switch to keep it in the profile's folder instead.
+2. Same for Goose: its keyring entry has a fixed name, so `GOOSE_DISABLE_KEYRING` keeps secrets in the profile's `config/secrets.yaml`.
+3. Aider has no login. Put each profile's API keys in its `.env` file (`keepapart login <name> --tool aider` prints the path); Aider reads it, keepapart doesn't. Aider still loads `~/.env` first, so don't keep keys there.
+4. OpenCode has no variable of its own and follows the XDG folders on every OS. Those variables would also affect other programs, so OpenCode works through `keepapart run`, not the shell hook.
+
+```bash
+keepapart add work --tool claude,gemini,grok      # one profile, three tools, three separate logins
+keepapart run work --tool gemini                  # Gemini CLI as your work Google account
+keepapart tools                                   # this list, plus which ones are installed
+```
+
+**DeepSeek** has no official CLI. Use DeepSeek models through any open-source tool above (OpenCode, Crush, Aider, Cline, Goose, Continue). Each profile keeps its own DeepSeek key.
+
+**Checked and not supported**, because their login can't be kept apart without copying tokens:
+
+| Tool | Why |
+|---|---|
+| GitHub Copilot CLI | `COPILOT_HOME` moves its settings, but the login stays in the OS keychain under a fixed name. It has its own account switcher: `/user switch` |
+| Cursor CLI, Amp, Kiro CLI | no documented way to move where they store their login |
+| Codewhale (formerly DeepSeek-TUI) | keeps keys in the OS keyring under a fixed name (`deepseek`) |
+
+If one of these adds such a setting, it becomes a few lines in [`src/tools.rs`](src/tools.rs). Issues and PRs welcome.
+
+### Any other AI CLI
+
+If a tool documents a variable that moves its config and login, add it to `~/.keepapart/tools.toml`:
+
+```toml
+[[tool]]
+id = "mytool"                    # used as --tool mytool
+program = "mytool"               # the command (default: the id)
+env = { MYTOOL_HOME = "{dir}", MYTOOL_NO_KEYRING = "1" }   # "{dir}" = this profile's folder for the tool
+login = ["login"]                # the tool's own login command (omit if it has none)
+logout = ["logout"]
+login_files = ["auth.json"]      # never shareable; only checked for existence
+share = [{ name = "AGENTS.md", kind = "file", default = true }]
+```
+
+keepapart refuses a definition where no variable points at `{dir}` (it wouldn't keep anything apart), one that sets system variables like `PATH` or `HOME`, and paths that leave the profile folder.
 
 ## Install
 
@@ -71,15 +134,16 @@ brew install keepapart
 
 Both come from this repo: the Scoop manifest is in [`bucket/`](bucket/) and the Homebrew formula in [`Formula/`](Formula/). Each release updates them with the new version and real checksums, and CI then installs keepapart through both on fresh Windows, macOS and Linux machines. `scoop update` and `brew upgrade` pick up new versions.
 
-You also need the official CLIs you plan to use: [Claude Code](https://code.claude.com/docs/en/setup) and/or [Codex](https://developers.openai.com/codex/cli). If the Claude Code installer left `claude` in `~/.local/bin` without adding it to PATH, keepapart still finds it there and tells you how to fix PATH.
+You also need the official CLIs you plan to use ([the list](#supported-ai-clis) links each one). If a native installer left a CLI in `~/.local/bin` without adding it to PATH, keepapart still finds it there and tells you how to fix PATH.
 
 ## Try it in 30 seconds
 
 ```bash
-keepapart add work --tool both     # creates the profile, then runs `claude auth login` and `codex login`
+keepapart add work --tool claude,gemini   # creates the profile, then runs each tool's own login
 keepapart add personal             # Claude only (the default)
 
 keepapart run work                 # terminal 1: Claude Code as your work account
+keepapart run work --tool gemini    # Gemini CLI as your work Google account
 keepapart run personal             # terminal 2: Claude Code as your personal account, at the same time
 
 cd ~/code/acme && keepapart use work    # this repo now always uses "work"
@@ -94,9 +158,10 @@ Pass arguments to the CLI after `--`: `keepapart run work -- --resume`, `keepapa
 | Command | What it does |
 |---|---|
 | `keepapart` | Pick a profile from a list and launch it |
-| `add <name> [--tool claude\|codex\|both] [--isolated] [--no-login]` | Create a profile (or add a tool to one) and log in with the official CLI |
+| `add <name> [--tool claude,gemini,...] [--isolated] [--no-login]` | Create a profile (or add tools to one) and log in with each official CLI. `both` = claude,codex |
 | `login <name> [--tool]` | Log in again, through the official CLI |
-| `run [name] [--tool] [--clean-env] [-- args]` | Launch `claude` / `codex` as that profile. With no name, uses the folder's profile. `--clean-env` hides `ANTHROPIC_API_KEY` and friends from that launch |
+| `run [name] [--tool] [--clean-env] [-- args]` | Launch a tool as that profile. With no name, uses the folder's profile. `--clean-env` hides API-key variables like `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` from that launch |
+| `tools` | Every supported AI CLI, what keepapart sets for it, and which are installed |
 | `use <name> [--global] [--clear]` | Pin a profile to this folder (`.keepapart`), or set the global default |
 | `list` / `status` | Profiles, tools, login file present, last used; which profile applies here and why |
 | `share <name> <item>…` / `unshare` / `shared` | Share items such as `claude:skills` between profiles, or keep them per profile |
@@ -213,11 +278,12 @@ keepapart hook powershell --write      # saves ~/.keepapart/hook.ps1 and prints 
 . "$HOME\.keepapart\hook.ps1"          # add this line to your profile: notepad $PROFILE
 ```
 
-The hook only sets or unsets `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `KEEPAPART_ACTIVE`, and only unsets variables it set itself. The PowerShell hook uses no `Invoke-Expression`: it reads plain `set`/`unset` lines and applies only those three variables. (Windows Defender blocks some `Invoke-Expression` patterns; this showed up in testing, and the hook was designed around it.) cmd.exe has no prompt hook, so use `keepapart run` there. The hooks are tested in real bash, zsh, fish and PowerShell in CI.
+The hook only sets or unsets the tools' folder variables (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GEMINI_CLI_HOME`, ...) and `KEEPAPART_ACTIVE`, and only unsets variables it set itself. OpenCode's XDG variables are never exported to your shell. The PowerShell hook uses no `Invoke-Expression`: it reads plain `set`/`unset` lines and refuses anything that isn't an UPPER_CASE name or is a system variable like `PATH`. (Windows Defender blocks some `Invoke-Expression` patterns; this showed up in testing, and the hook was designed around it.) cmd.exe has no prompt hook, so use `keepapart run` there. The hooks are tested in real bash, zsh, fish and PowerShell in CI.
 
 ## Security
 
-- **keepapart never reads, copies, exports or moves credentials.** Logins are created by the official CLI (`claude auth login`, `codex login`), in that profile's folder, by the CLI's own code.
+- **keepapart never reads, copies, exports or moves credentials.** Logins are created by each official CLI (`claude auth login`, `codex login`, `grok login`, ...), in that profile's folder, by the CLI's own code.
+- **A tool is only supported if its own documented setting keeps its login in the profile's folder.** Where a tool could fall back to a keychain entry with a fixed name (Gemini CLI, Goose), keepapart also sets the tool's own switch that keeps it in the folder.
 - **It never touches the OS keychain** or the Windows Credential Manager.
 - The only thing it checks about a login is **whether the login file exists** (for `list` / `doctor`). It never opens it.
 - **No network calls, no telemetry, no update checks.** It doesn't show usage or limits, because that would mean using your token or calling unofficial endpoints. Run `/usage` in Claude Code or `/status` in Codex instead.
@@ -233,6 +299,7 @@ From each project's README on 2026-11-12. "—" means the README doesn't mention
 |---|---|---|---|---|---|---|---|
 | Claude Code | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Codex | ✅ | ➖ | ✅ | ✅ | ✅ | ✅ | ➖ |
+| Other AI CLIs | ✅ 10 more + your own (`tools.toml`) | ➖ | ➖ | ➖ | Antigravity | Gemini CLI, Antigravity | ➖ |
 | Windows without WSL | ✅ cmd + PowerShell | ✅ | Git Bash / MSYS2 | ✅ PowerShell | ✅ | ➖ WSL | ➖ WSL |
 | How logins are kept | official CLI, own folder | stored backups, swapped in | snapshots of the credentials file | own folder | saved logins, switched | own folder (plus legacy snapshots) | official CLI, own folder |
 | Uses your token for usage/quota | **never** | yes | yes | yes | yes | opt-in | not in README |
@@ -244,6 +311,9 @@ From each project's README on 2026-11-12. "—" means the README doesn't mention
 Pick claude-swap, clauth or ccswap if you want usage dashboards. Pick keepapart if you want the smallest trust surface: nothing in it can touch a token, because nothing in it reads one.
 
 ## FAQ
+
+**Is it only for Claude and Codex?**
+No. It supports 12 AI CLIs (subscription and open source), and you can add any other CLI that has a documented setting to move its login. See [Supported AI CLIs](#supported-ai-clis), and `keepapart tools`.
 
 **Is using several accounts allowed?**
 Having separate accounts for separate purposes (an employer's seat and a personal plan, or a seat per client) is the normal case this tool is built for. Using extra accounts to get around usage limits is not, and keepapart won't help with it. Check each provider's terms for your situation.
@@ -278,7 +348,7 @@ Run `keepapart remove <name>` for each profile (it signs each one out through th
 ## Development
 
 ```bash
-cargo test                       # unit + end-to-end tests; uses stand-in claude/codex programs
+cargo test                       # unit + end-to-end tests; uses stand-in programs for every supported CLI
 cargo clippy --all-targets -- -D warnings
 ```
 

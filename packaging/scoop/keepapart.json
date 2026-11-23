@@ -1,6 +1,6 @@
 {
     "version": "{{VERSION}}",
-    "description": "One machine, many Claude & Codex accounts. Work, personal, clients, kept apart.",
+    "description": "One machine, many AI coding accounts. Work, personal, clients, kept apart.",
     "homepage": "https://github.com/moelsaka01/keepapart",
     "license": "MIT",
     "architecture": {

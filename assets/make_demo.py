@@ -143,8 +143,9 @@ def main():
     card(
         [
             ("keepapart", F_BIG, FG, 110),
-            ("One machine, many Claude & Codex accounts.", F_SUB, FG, 44),
+            ("One machine, many AI coding accounts.", F_SUB, FG, 44),
             ("Work, personal, clients, kept apart.", F_SUB, PURPLE, 70),
+            ("Claude Code · Codex · Gemini · Grok · Kimi · Qwen · Goose · Crush · Cline · Continue · Aider · OpenCode", load(SANS, 22), FG, 46),
             ("Windows · macOS · Linux     open source (MIT)", F_BODY, DIM, 40),
         ],
         2600,
@@ -201,7 +202,7 @@ def main():
     card(
         [
             ("Your tokens are never touched", F_TITLE, FG, 70),
-            ("Each profile is its own CLAUDE_CONFIG_DIR / CODEX_HOME.", F_BODY, FG, 44),
+            ("Each profile gives each AI CLI its own folder (CLAUDE_CONFIG_DIR, GEMINI_CLI_HOME, ...).", F_BODY, FG, 44),
             ("You log in with the official CLI. keepapart never reads a token.", F_BODY, FG, 44),
             ("No network calls. No telemetry.", F_BODY, FG, 44),
             ("No rate-limit hopping: it keeps accounts apart, it doesn't rotate them.", F_BODY, PURPLE, 44),

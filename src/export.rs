@@ -6,7 +6,7 @@
 //! skipped rather than exported unchecked.
 
 use crate::profile::Profile;
-use crate::share::{copy_any, profile_path, Kind, CATALOG};
+use crate::share::{catalog, copy_any, profile_path, Kind};
 use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::Path;
@@ -97,14 +97,19 @@ pub fn export(p: &Profile, out: &Path) -> Result<Report> {
     }
     fs::create_dir_all(out)?;
     let mut r = Report::default();
-    for item in CATALOG.iter().filter(|i| p.has(i.tool)) {
+    for item in catalog().iter().filter(|i| p.has(i.tool)) {
         let src = profile_path(p, item);
         if !src.exists() {
             continue;
         }
-        let dst = out.join(item.tool.as_str()).join(item.name);
-        match (item.kind, item.name) {
-            (Kind::File, "settings.json") => {
+        let dst = out.join(item.tool.as_str()).join(item.path);
+        let ext = std::path::Path::new(item.path).extension().and_then(|e| e.to_str()).unwrap_or("");
+        match (item.kind, ext) {
+            (Kind::File, "yaml" | "yml") => {
+                r.skipped.push((item.id(), "YAML isn't checked for secrets, so it isn't exported".into()));
+                continue;
+            }
+            (Kind::File, "json") => {
                 let text = fs::read_to_string(&src)?;
                 match serde_json::from_str::<serde_json::Value>(&text) {
                     Ok(mut v) => {
@@ -118,7 +123,7 @@ pub fn export(p: &Profile, out: &Path) -> Result<Report> {
                     }
                 }
             }
-            (Kind::File, "config.toml") => {
+            (Kind::File, "toml") => {
                 let text = fs::read_to_string(&src)?;
                 match toml::from_str::<toml::Value>(&text) {
                     Ok(mut v) => {

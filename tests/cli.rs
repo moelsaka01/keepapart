@@ -585,3 +585,178 @@ fn closed_stdout_is_not_a_crash() {
     assert!(!err.contains("panicked"), "{err}");
     assert!(out.status.success(), "{err}");
 }
+
+/// A fake CLI that prints the given variables (and logs its call), for any tool.
+fn write_fake_vars(dir: &Path, name: &str, vars: &[&str]) {
+    #[cfg(windows)]
+    {
+        let mut body = String::from("@echo off\r\n");
+        for v in vars {
+            body.push_str(&format!("echo {v}=%{v}%\r\n"));
+        }
+        body.push_str("echo ACTIVE=%KEEPAPART_ACTIVE%\r\necho ARGS=%*\r\n");
+        body.push_str(&format!("if not \"%KP_LOG%\"==\"\" echo %KEEPAPART_ACTIVE% {name} %*>> \"%KP_LOG%\"\r\n"));
+        fs::write(dir.join(format!("{name}.cmd")), body).unwrap();
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut body = String::from("#!/bin/sh\n");
+        for v in vars {
+            body.push_str(&format!("echo \"{v}=${v}\"\n"));
+        }
+        body.push_str("echo \"ACTIVE=$KEEPAPART_ACTIVE\"\necho \"ARGS=$*\"\n");
+        body.push_str(&format!(
+            "if [ -n \"$KP_LOG\" ]; then echo \"$KEEPAPART_ACTIVE {name} $*\" >> \"$KP_LOG\"; fi\n"
+        ));
+        let p = dir.join(name);
+        fs::write(&p, body).unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+/// (tool id, program, [(variable, expected value relative to the tool folder, or "=literal")])
+type ToolCase = (&'static str, &'static str, &'static [(&'static str, &'static str)]);
+const NEW_TOOLS: &[ToolCase] = &[
+    ("gemini", "gemini", &[("GEMINI_CLI_HOME", ""), ("GEMINI_FORCE_FILE_STORAGE", "=true")]),
+    ("qwen", "qwen", &[("QWEN_HOME", "")]),
+    ("grok", "grok", &[("GROK_HOME", "")]),
+    ("kimi", "kimi", &[("KIMI_CODE_HOME", "")]),
+    ("goose", "goose", &[("GOOSE_PATH_ROOT", ""), ("GOOSE_DISABLE_KEYRING", "=1")]),
+    ("crush", "crush", &[("CRUSH_GLOBAL_CONFIG", "config"), ("CRUSH_GLOBAL_DATA", "data")]),
+    ("cline", "cline", &[("CLINE_DIR", ""), ("CLINE_DATA_DIR", "data")]),
+    ("continue", "cn", &[("CONTINUE_GLOBAL_DIR", "")]),
+    ("aider", "aider", &[("AIDER_ENV_FILE", ".env")]),
+    ("opencode", "opencode", &[("XDG_DATA_HOME", "data"), ("XDG_STATE_HOME", "state")]),
+];
+
+fn expected(e: &Env, profile: &str, tool: &str, rel: &str) -> String {
+    if let Some(lit) = rel.strip_prefix('=') {
+        return lit.to_string();
+    }
+    let d = e.profile_dir(profile, tool);
+    if rel.is_empty() { d } else { d.join(rel) }.display().to_string()
+}
+
+#[test]
+fn every_new_tool_gets_its_documented_variables_in_its_own_folder() {
+    let e = env();
+    for (_, prog, vars) in NEW_TOOLS {
+        let names: Vec<&str> = vars.iter().map(|(v, _)| *v).collect();
+        write_fake_vars(&e.bin, prog, &names);
+    }
+    let all: Vec<&str> = NEW_TOOLS.iter().map(|(id, _, _)| *id).collect();
+    for p in ["work", "personal"] {
+        e.cmd().args(["add", p, "--tool", &all.join(","), "--no-login"]).assert().success();
+    }
+    for (id, _, vars) in NEW_TOOLS {
+        let mut seen = vec![];
+        for p in ["work", "personal"] {
+            let out = e.cmd().args(["run", p, "--tool", id, "--", "hello"]).output().unwrap();
+            let s = String::from_utf8_lossy(&out.stdout).to_string();
+            assert!(out.status.success(), "{id}: {s}{}", String::from_utf8_lossy(&out.stderr));
+            for (v, rel) in *vars {
+                let want = format!("{v}={}", expected(&e, p, id, rel));
+                assert!(s.lines().any(|l| l.trim_end() == want), "{id} in {p}: expected {want}\n{s}");
+            }
+            assert!(s.contains(&format!("ACTIVE={p}")), "{s}");
+            seen.push(s);
+        }
+        assert_ne!(seen[0], seen[1], "{id}: work and personal must differ");
+    }
+}
+
+#[test]
+fn aider_login_explains_the_key_file_and_launches_nothing() {
+    let e = env();
+    write_fake_vars(&e.bin, "aider", &["AIDER_ENV_FILE"]);
+    e.cmd().args(["add", "work", "--tool", "aider", "--no-login"]).assert().success();
+    fs::write(&e.log, "").unwrap();
+    e.cmd()
+        .args(["login", "work"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(".env").and(predicate::str::contains("keepapart never does")));
+    assert_eq!(e.calls().trim(), "");
+    e.cmd().args(["share", "work", "aider:.env"]).assert().failure();
+}
+
+#[test]
+fn custom_tools_from_tools_toml() {
+    let e = env();
+    fs::create_dir_all(&e.home).unwrap();
+    fs::write(
+        e.home.join("tools.toml"),
+        r#"
+[[tool]]
+id = "mytool"
+name = "My Tool"
+env = { MYTOOL_HOME = "{dir}", MYTOOL_NO_KEYRING = "1" }
+login = ["signin"]
+login_files = ["token.json"]
+share = [{ name = "AGENTS.md", kind = "file", default = true }]
+"#,
+    )
+    .unwrap();
+    write_fake_vars(&e.bin, "mytool", &["MYTOOL_HOME", "MYTOOL_NO_KEYRING"]);
+    e.cmd().args(["add", "work", "--tool", "mytool,claude"]).assert().success();
+    let calls = e.calls();
+    assert!(calls.contains("work mytool signin"), "{calls}");
+    let out = e.cmd().args(["run", "work", "--tool", "mytool"]).output().unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.contains(&format!("MYTOOL_HOME={}", e.profile_dir("work", "mytool").display())), "{s}");
+    assert!(s.contains("MYTOOL_NO_KEYRING=1"), "{s}");
+    assert!(e.profile_dir("work", "mytool").join("AGENTS.md").exists());
+    e.cmd()
+        .arg("tools")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mytool").and(predicate::str::contains("My Tool")));
+    e.cmd().args(["share", "work", "mytool:token.json"]).assert().failure();
+
+    // a definition that wouldn't keep logins apart is refused with a clear message
+    fs::write(e.home.join("tools.toml"), "[[tool]]\nid = \"bad\"\nenv = { BAD_MODE = \"1\" }\n").unwrap();
+    e.cmd()
+        .arg("list")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("tools.toml").and(predicate::str::contains("kept apart")));
+}
+
+#[test]
+fn shell_hook_exports_tool_variables_but_never_xdg() {
+    let e = env();
+    e.cmd().args(["add", "work", "--tool", "gemini,opencode", "--no-login"]).assert().success();
+    e.cmd().args(["use", "work"]).assert().success();
+    let out = e.cmd().args(["env", "--shell", "bash"]).output().unwrap();
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.contains("export GEMINI_CLI_HOME='"), "{s}");
+    assert!(s.contains("export GEMINI_FORCE_FILE_STORAGE='true'"), "{s}");
+    assert!(!s.contains("XDG_"), "{s}");
+    let out = e.cmd().args(["env", "--shell", "ps-data"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stdout).contains("set\tGEMINI_CLI_HOME\t"));
+}
+
+#[test]
+fn nested_shared_items_and_tool_errors() {
+    let e = env();
+    e.cmd().args(["add", "a", "--tool", "gemini", "--no-login"]).assert().success();
+    e.cmd().args(["add", "b", "--tool", "gemini", "--no-login"]).assert().success();
+    let a_md = e.profile_dir("a", "gemini").join(".gemini").join("GEMINI.md");
+    fs::write(&a_md, "shared gemini instructions").unwrap();
+    assert_eq!(
+        fs::read_to_string(e.profile_dir("b", "gemini").join(".gemini").join("GEMINI.md")).unwrap(),
+        "shared gemini instructions"
+    );
+    e.cmd().args(["share", "a", "gemini:.gemini/oauth_creds.json"]).assert().failure();
+    e.cmd()
+        .args(["add", "c", "--tool", "copilot", "--no-login"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown tool").and(predicate::str::contains("gemini")));
+    e.cmd()
+        .arg("tools")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Grok Build").and(predicate::str::contains("GitHub Copilot CLI")));
+}

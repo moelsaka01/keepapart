@@ -17,7 +17,7 @@ use std::fs;
 use std::path::PathBuf;
 
 pub fn path(store: &Store) -> PathBuf {
-    store.shared_dir(Tool::Claude).join("mcp-servers.json")
+    store.shared_dir(Tool::CLAUDE).join("mcp-servers.json")
 }
 
 pub fn load(store: &Store) -> Result<Map<String, Value>> {
@@ -72,23 +72,23 @@ fn os(args: &[&str]) -> Vec<OsString> {
 /// official CLI. Servers keepapart added earlier but no longer shares are
 /// removed; servers you added yourself under other names are left alone.
 pub fn sync_profile(store: &Store, p: &mut Profile) -> Result<Vec<String>> {
-    if !p.has(Tool::Claude) {
+    if !p.has(Tool::CLAUDE) {
         return Ok(vec![]);
     }
     let m = load(store)?;
     let mut log = Vec::new();
     for old in p.file.mcp_synced.clone() {
         if !m.contains_key(&old) {
-            launch::capture(p, Tool::Claude, &os(&["mcp", "remove", "--scope", "user", &old]))?;
+            launch::capture(p, Tool::CLAUDE, &os(&["mcp", "remove", "--scope", "user", &old]))?;
             log.push(format!("removed {old}"));
         }
     }
     let mut synced = Vec::new();
     for (name, cfg) in &m {
         // Replace, so edits to the shared config reach the profile.
-        launch::capture(p, Tool::Claude, &os(&["mcp", "remove", "--scope", "user", name]))?;
+        launch::capture(p, Tool::CLAUDE, &os(&["mcp", "remove", "--scope", "user", name]))?;
         let json = serde_json::to_string(cfg)?;
-        let out = launch::capture(p, Tool::Claude, &os(&["mcp", "add-json", "--scope", "user", name, &json]))?;
+        let out = launch::capture(p, Tool::CLAUDE, &os(&["mcp", "add-json", "--scope", "user", name, &json]))?;
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr);
             bail!("claude mcp add-json {name} failed for profile {:?}: {}", p.name(), err.trim());
