@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-11-23)
 
 - **Not just Claude and Codex anymore.** Built-in support for Gemini CLI, Grok Build (xAI), Kimi Code CLI, Qwen Code, Goose, Crush, Cline CLI, Continue CLI, Aider and OpenCode, each through the setting its makers document for moving its folder (`GEMINI_CLI_HOME`, `GROK_HOME`, `KIMI_CODE_HOME`, ...). Where a tool could fall back to a keychain entry with a fixed name (Gemini CLI, Goose), keepapart also sets the tool's own switch that keeps the login in the profile's folder.
 - **Your own tools**: define any other CLI in `~/.keepapart/tools.toml`. Definitions that wouldn't keep logins apart, set system variables or leave the profile folder are refused.
