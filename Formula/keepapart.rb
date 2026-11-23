@@ -3,28 +3,28 @@
 class Keepapart < Formula
   desc "One machine, many AI coding accounts. Work, personal, clients, kept apart"
   homepage "https://github.com/moelsaka01/keepapart"
-  version "0.1.1"
+  version "0.2.0"
   license "MIT"
 
   on_macos do
     on_arm do
-      url "https://github.com/moelsaka01/keepapart/releases/download/v0.1.1/keepapart-v0.1.1-aarch64-apple-darwin.tar.gz"
-      sha256 "b161227ed14b65426f00f882041ffd0362c2798c5ad834bb981d5d296c165558"
+      url "https://github.com/moelsaka01/keepapart/releases/download/v0.2.0/keepapart-v0.2.0-aarch64-apple-darwin.tar.gz"
+      sha256 "8bc22819946ee30cf8fe5704962184986c83027a1654470d80ca707c44fa4905"
     end
     on_intel do
-      url "https://github.com/moelsaka01/keepapart/releases/download/v0.1.1/keepapart-v0.1.1-x86_64-apple-darwin.tar.gz"
-      sha256 "f75cdd10408483cf7ae5accfe71d5b50e1697af265b58c44b6c5eb212943e909"
+      url "https://github.com/moelsaka01/keepapart/releases/download/v0.2.0/keepapart-v0.2.0-x86_64-apple-darwin.tar.gz"
+      sha256 "bb9d666c957f8f155b18f9e41a87b13f551f0133f6717c89cc4a937268c97368"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/moelsaka01/keepapart/releases/download/v0.1.1/keepapart-v0.1.1-aarch64-unknown-linux-musl.tar.gz"
-      sha256 "5b9e2c4613a0655e7cd7ce9fc6fb80ca174edcf8527e0cd6a608b2a2b98d268f"
+      url "https://github.com/moelsaka01/keepapart/releases/download/v0.2.0/keepapart-v0.2.0-aarch64-unknown-linux-musl.tar.gz"
+      sha256 "e47cea449c4100ec5a3b06a82dec78a8ad9e2791cab790903936e2d02779e96b"
     end
     on_intel do
-      url "https://github.com/moelsaka01/keepapart/releases/download/v0.1.1/keepapart-v0.1.1-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "f8bdc0686962a9a128f8991d49e3b3bedca50cb93fda918edd0d7af7dd84f485"
+      url "https://github.com/moelsaka01/keepapart/releases/download/v0.2.0/keepapart-v0.2.0-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "34865a89fad9ddddc23a66a43c523a82ffaa927334420151a05d818b35d4b3bb"
     end
   end
 

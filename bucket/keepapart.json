@@ -1,18 +1,18 @@
 {
-    "version": "0.1.1",
+    "version": "0.2.0",
     "description": "One machine, many AI coding accounts. Work, personal, clients, kept apart.",
     "homepage": "https://github.com/moelsaka01/keepapart",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/moelsaka01/keepapart/releases/download/v0.1.1/keepapart-v0.1.1-x86_64-pc-windows-msvc.zip",
-            "hash": "d14aa51a5fee3608acd0580747e24e73826f9d3de149d1804d7df792f303f919",
-            "extract_dir": "keepapart-v0.1.1-x86_64-pc-windows-msvc"
+            "url": "https://github.com/moelsaka01/keepapart/releases/download/v0.2.0/keepapart-v0.2.0-x86_64-pc-windows-msvc.zip",
+            "hash": "84771c9f1fc4487013cadf9bee6edea13a7ba279d120f3e71b685835c5b42baf",
+            "extract_dir": "keepapart-v0.2.0-x86_64-pc-windows-msvc"
         },
         "arm64": {
-            "url": "https://github.com/moelsaka01/keepapart/releases/download/v0.1.1/keepapart-v0.1.1-aarch64-pc-windows-msvc.zip",
-            "hash": "04d8f3f4df199384eb7f1d3a7f309a60d58bb4952967fef155911b9b28118231",
-            "extract_dir": "keepapart-v0.1.1-aarch64-pc-windows-msvc"
+            "url": "https://github.com/moelsaka01/keepapart/releases/download/v0.2.0/keepapart-v0.2.0-aarch64-pc-windows-msvc.zip",
+            "hash": "43db57aaa159a8d6674d7e333a351a01dbdebc936298363819710d620cf4c514",
+            "extract_dir": "keepapart-v0.2.0-aarch64-pc-windows-msvc"
         }
     },
     "bin": "keepapart.exe",
